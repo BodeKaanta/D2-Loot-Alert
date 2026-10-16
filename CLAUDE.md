@@ -9,13 +9,14 @@ Read this whole file before doing anything in this repo. It is the shared memory
 ## Working rules (non-negotiable)
 
 1. **Never write code on `main`.** All work happens on a task branch. Before editing any file, run `git branch --show-current`. If it says `main`, stop and switch to (or create) the branch for the current task.
-2. **Bode reviews all code before it is pushed.** This is a learning project. The loop for every change is:
+2. **Bode reviews all code before it is committed.** This is a learning project. The loop for every change is:
    1. Write the change.
-   2. Show the diff and explain what it does and why. Explain Kotlin and Android concepts by relating them to Java, which Bode knows well.
-   3. Wait for explicit approval.
-   4. Commit, then push.
+   2. Show Bode the new or changed code and explain how it works. While Bode is still learning Kotlin, go into some detail on syntax and concepts, relating them to Java.
+   3. Answer any questions and fix any logic issues Bode spots.
+   4. Wait for explicit approval.
+   5. Commit, then push.
 
-   Never push anything Bode hasn't seen. This covers code, build files, manifests, CI workflows and docs.
+   Never commit or push anything Bode hasn't seen. This covers code, build files, manifests, CI workflows and docs.
 3. **Never merge pull requests.** No `gh pr merge`, no merging into `main` locally and no pushing to `main`. You may commit and push to working branches and open PRs. Bode always has the final say on merges.
 4. **Every feature or problem gets a task on the kanban board,** assigned to Bode (`BodeKaanta`) with a size of S, M or L. Use **one branch per task.** See [Task workflow](#task-workflow).
 5. **Never commit secrets.** The Bungie API key lives in `local.properties` (Android) or an environment variable or gitignored file (scripts). Check the diff for keys before every commit.
@@ -28,16 +29,21 @@ Read this whole file before doing anything in this repo. It is the shared memory
 - Bode is a senior computer science student.
 - Comfortable in Java, Python, C and C++, with some Flutter/Dart: coursework without AI, plus one larger project using AI as a tool.
 - **New to Kotlin** and wants to learn it to grow their portfolio. Teach as you go: point out Kotlin idioms (null safety, data classes, coroutines, extension functions) and how they compare to Java.
+- **Who writes the code:** Claude writes it and explains it. After roughly 5–10 coding commits, start sometimes giving Bode pseudocode to fill in, for small, self-contained pieces only.
+- **Keep it quick and easy.** Bode is also shipping a separate large app to both app stores, so this project should stay low-effort. Choose the simplest approach that works, don't over-engineer, and keep tasks small.
+- **Device:** Pixel 9 Pro XL on the latest Android. Android Studio is installed on Bode's Windows PC.
+  - This is the only device the app will ever run on, so `minSdk` can be recent. Pick it when the Android project is created.
 - Offer recommendations, but leave design decisions to Bode.
 
 ## Task workflow
 
 - **Repo:** `BodeKaanta/D2-Loot-Alert`
-- **Board:** GitHub Project #6, linked to the repo: https://github.com/users/BodeKaanta/projects/6
+- **Board:** "D2 Loot Alert Task Board", GitHub Project #6, linked to the repo: https://github.com/users/BodeKaanta/projects/6
 - **Board fields:**
   - `Status`: Backlog / In Progress / Done
-  - `Size`: use **S, M or L only** (the board also offers XS and XL; don't use them)
+  - `Size`: S / M / L
   - `Priority`: P0 / P1 / P2
+- **New tasks:** before creating tasks, explain what each one is and why it's needed, and agree on the breakdown with Bode. Don't bulk-create a backlog without discussing it first.
 - **Size guide:**
   - S: an hour or two
   - M: about one evening
@@ -72,7 +78,7 @@ Read this whole file before doing anything in this repo. It is the shared memory
    - Include `Closes #<issue>` so the issue closes when Bode merges.
 7. Bode reviews and merges. Never merge yourself.
 
-**Branch naming:** `<issue#>_<short_snake_case_description>`, e.g. `2_phase0_api_spike`. `getting_started` (issue #1) predates this convention.
+**Branch naming:** `task_<issue#>_<short_snake_case_description>`, e.g. `task_2_phase0_api_spike`. `getting_started` (issue #1) predates this convention.
 
 ---
 
@@ -199,7 +205,7 @@ Phase 0 script language is not decided yet. Python is fastest since Bode knows i
 ## Current status
 
 - **Issue #1** (branch `getting_started`): README and CLAUDE.md. In review.
-- **Next:** Phase 0 API spike, in a new task and branch.
+- **Next:** break Phases 0–4 down into tasks together with Bode, then start the Phase 0 API spike.
 
 ## Decision log
 
@@ -207,3 +213,6 @@ Phase 0 script language is not decided yet. Python is fastest since Bode knows i
 - **2026-10-16:** No OAuth. Use an API key plus a public Bungie.net progression setting.
 - **2026-10-16:** Personal use only. Sideloaded APK, no store release, Android only.
 - **2026-10-16:** Poll every few hours with deduplication by reset ID, instead of scheduling exactly at reset.
+- **2026-10-16:** Review happens before commit: Claude shows and explains the code, then commits and pushes after Bode approves.
+- **2026-10-16:** Branch names follow `task_<issue#>_<description>`.
+- **2026-10-16:** The board's Size field was trimmed to S/M/L, and the board was renamed "D2 Loot Alert Task Board".
