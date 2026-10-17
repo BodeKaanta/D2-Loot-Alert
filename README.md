@@ -1,8 +1,8 @@
 # D2 Loot Alert
 
-An Android app that tells you when the Destiny 2 loot you're chasing is easy to farm.
+An Android and iOS app that tells you when the Destiny 2 loot you're chasing is easy to farm.
 
-> **Status:** Planning. No app code yet. See the [roadmap](#roadmap).
+> **Status:** Early development. No app code yet. See the [roadmap](#roadmap).
 
 ## The problem
 
@@ -18,73 +18,72 @@ If you can't play every day, you either check the game daily or miss the window 
 The app is planned to:
 
 - **Browse activities and their loot pools**, then pick the weapons you care about.
-- **Watch a weapon,** in one specific activity or in any activity, and get a phone notification on the day it's the bonus focus.
+- **Watch a weapon** and get a push notification on the day it's a bonus focus drop, naming the activity.
 - **Watch raids and dungeons** and get a notification in the week they're featured.
-- **Show a Today screen** with every activity's current bonus focus at a glance.
-- **Keep a rotation history** of every bonus focus it has seen, which fills in loot pools over time and may allow forecasting ("likely back in 3 days").
+- **Show a Today screen** with every activity's current bonus focus and this week's featured raids and dungeons.
+- **Keep a rotation history** of every bonus focus seen, which fills in loot pools over time.
 
 ## How it works
 
 ```
- every few hours (Android WorkManager)
-        │
-        ▼
- Bungie.net API ── your characters' available activities
-        │          and each one's currently visible rewards
-        ▼
- look up item and activity names (Destiny manifest, cached)
-        │
-        ▼
- save today's snapshot ──► compare against your watchlist
-                                    │
-                                    ▼
-                          local notification on a match
-                          (once per watch per reset)
+ once a day, shortly after reset
+   scheduled cloud function ──► Bungie.net API
+        │                       (today's activities and their visible rewards)
+        ├──► saves today's rotation to a database
+        └──► sends a push notification to everyone watching
+             each bonus-focus weapon or featured raid
+
+ the app
+   ├── reads today's rotation for the Today screen
+   ├── watching an item subscribes the phone to that item's alerts
+   └── receives the pushes
 ```
 
-Everything runs on the phone. There is no server and no login. The app reads public data from the [Bungie.net API](https://github.com/Bungie-net/api), which needs only an API key and a Bungie.net profile with progression set to public.
+- **No accounts and no login.** Watching an item subscribes the phone to a push topic, so the server never stores who is watching what.
+- **No API key on the phone.** Only the backend talks to the [Bungie.net API](https://github.com/Bungie-net/api).
+- **Why a server at all:** iOS doesn't let apps reliably run on a schedule, so the checks happen in the cloud and arrive as pushes on both platforms.
 
-## Tech stack (planned)
+## Tech stack
 
 | Area | Choice |
 |---|---|
-| Language | Kotlin |
-| UI | Jetpack Compose |
-| Background work | WorkManager |
-| Storage | Room (SQLite) |
-| Networking | Retrofit + OkHttp or Ktor (decided in Phase 1) |
-| JSON | kotlinx.serialization |
+| App | Flutter (Android + iOS), with a custom design |
+| Backend | Cloud Functions for Firebase (Python), scheduled |
+| Database | Cloud Firestore |
+| Notifications | Firebase Cloud Messaging (topics) |
 | Data source | Bungie.net Platform API |
 
 ## Scope
 
 **In scope**
-- One user: me
-- Android only, installed by sideloading an APK
-- Daily bonus focus alerts for any activity the API exposes
+- A small group of users: me and a friend
+- Android, installed by sideloading an APK
+- iOS through TestFlight, moving to the App Store if it sticks
+- Daily bonus focus alerts for weapons
 - Weekly featured raid and dungeon alerts
 
-**Out of scope**
-- Google Play or App Store release
-- iOS
-- Multiple users, accounts or a backend server
-- Bungie login (OAuth), inventory management and vendor tracking
+**Out of scope (for now)**
+- Google Play release
+- User accounts or Bungie login (OAuth)
+- Armor bonus focus, inventory management and vendor tracking
 
 ## Roadmap
 
-| Phase | Goal | Status |
+| Task | Goal | Status |
 |---|---|---|
-| 0. API spike | Script that pulls live data and confirms how bonus focus and featured raids appear in the API | Not started |
-| 1. Core logic | Fetch, resolve names, snapshot and watchlist matching, unit-tested | Not started |
-| 2. Bare app | Today screen, background check, notifications | Not started |
-| 3. Watchlist UI | Browse loot pools, watch weapons, pick raids and dungeons | Not started |
-| 4. Extras | Rotation history, forecasting, notification deep links | Not started |
+| Phase 0: API test | Script that pulls live data and confirms how bonus focus and featured raids appear in the API | Not started |
+| Firebase setup | Project, push notifications for Android and iOS, database | Not started |
+| Daily rotation job | Scheduled function that saves each day's rotation | Not started |
+| Push notifications | Alerts for bonus focus weapons and featured raids | Not started |
+| App: Today screen | Flutter app with a custom look, showing today's rotation | Not started |
+| App: watch screens | Browse loot pools and raids, toggle alerts | Not started |
+| Release | Android APK and iOS TestFlight | Not started |
 
 Work is tracked on the [project board](https://github.com/users/BodeKaanta/projects/6).
 
 ## Building
 
-Coming in Phase 2. You'll need Android Studio and your own Bungie API key from [bungie.net/en/Application](https://www.bungie.net/en/Application). The key goes in `local.properties`, which is never committed.
+Coming soon. You'll need Flutter, a Firebase project and your own Bungie API key from [bungie.net/en/Application](https://www.bungie.net/en/Application). The key is stored as a Firebase secret and never committed.
 
 ## Disclaimer
 
