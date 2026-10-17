@@ -11,7 +11,7 @@ Read this whole file before doing anything in this repo. It is the shared memory
 1. **Never write code on `main`.** All work happens on a task branch. Before editing any file, run `git branch --show-current`. If it says `main`, stop and switch to (or create) the branch for the current task.
 2. **Bode reviews all code before it is committed.** The loop for every change is:
    1. Write the change.
-   2. Show Bode the new or changed code and explain how it works. Go into more detail on the parts that are new to Bode: the Firebase backend, Python Cloud Functions, push notification setup, and Flutter or Dart patterns beyond the basics.
+   2. Show Bode the new or changed code and explain how it works. Go into more detail on the parts that are new to Bode: the Firebase backend, GitHub Actions, push notification setup, and Flutter or Dart patterns beyond the basics.
    3. Answer any questions and fix any logic issues Bode spots.
    4. Wait for explicit approval.
    5. Commit, then push.
@@ -20,9 +20,9 @@ Read this whole file before doing anything in this repo. It is the shared memory
 3. **Never merge pull requests.** No `gh pr merge`, no merging into `main` locally and no pushing to `main`. You may commit and push to working branches and open PRs. Bode always has the final say on merges.
 4. **Every feature or problem gets a task on the kanban board,** assigned to Bode (`BodeKaanta`) with a size of S, M or L. Use **one branch per task.** See [Task workflow](#task-workflow).
 5. **Never commit secrets. The repo is public.**
-   - The Bungie API key lives in a gitignored `.env` file locally and in a Firebase Functions secret in the cloud.
-   - Never commit Firebase service-account keys (JSON files containing `private_key`).
-   - The Firebase client config files (`google-services.json`, `GoogleService-Info.plist`) aren't secrets, but decide in #5 whether to commit them.
+   - The Bungie API key lives in a gitignored `.env` file locally and in a GitHub Actions secret for the backend.
+   - Never commit Firebase service-account keys (JSON files containing `private_key`). The backend's key lives only in the `FIREBASE_SERVICE_ACCOUNT` GitHub secret, and Bode's downloaded copy stays outside the repo folder.
+   - The Firebase client config files (`google-services.json`, `GoogleService-Info.plist`, `firebase_options.dart`) aren't secrets, but decide in #8 whether to commit them.
    - Check the diff for keys before every commit.
 6. **No force-pushes, history rewriting on pushed branches or skipped hooks** (`--no-verify`).
 7. **Ask before adding a dependency.** Say what it does and why it's needed.
@@ -111,6 +111,8 @@ No user accounts and no login. The README holds the public-facing scope.
 ## Destiny 2 domain notes
 
 - **Resets:** daily reset is **17:00 UTC** and weekly reset is **Tuesday 17:00 UTC**, both fixed in UTC regardless of daylight saving time. Trials of Osiris runs from Friday reset to Tuesday reset.
+  - For Bode (Mountain time), that's 11 AM during daylight saving time and 10 AM after the clocks change on Nov 1, 2026.
+  - Daily reset changes the bonus focuses and vendor stock. Weekly reset changes the featured raids and dungeons.
 - **Bonus focus:** each activity features one boosted item per day, changing at daily reset.
   - In-game, the activity preview shows the specific weapon or armor icon.
   - A separate "Bonus Drop" appears as a generic green engram. That is a different thing.
@@ -119,7 +121,10 @@ No user accounts and no login. The README holds the public-facing scope.
   - The 6 armor focuses were each class's version of the same set, e.g. Eutechnology Robes, Vest and Plate.
   - Armor bonus focus is out of scope for now.
 - **One activity often has several entries with the same focus:** "Customize" and "Matchmade", or "Normal" and "Master". Group them so a weapon gets one alert, not several.
-- **Crucible on 2026-10-17:** only Competitive had a bonus focus. Control, Supremacy and Rumble showed only the generic bonus engram. Trials of Osiris was listed (it was Saturday) but showed no rewards at all. Watch for a few days whether Crucible's focus moves between modes.
+- **Crucible: one mode has the focus at a time** (Bode, confirmed by the data). Sparrow Racing League has its own separate focus.
+  - Before the 2026-10-17 reset, Competitive had The Helmsman, and Trials, though live, showed no rewards at all.
+  - After that reset, Competitive had nothing and Trials had Autumn Wind, a general Crucible weapon rather than a Trials-only one.
+- **Gambit** had Last Man Standing both before and after the 2026-10-17 reset. It's unclear whether it sometimes repeats or rotates more slowly; the history from #6 will show.
 - **Featured raids and dungeons:** currently 2 raids and 2 dungeons per week. For the week of 2026-10-13 these were Vow of the Disciple and Last Wish, plus Vesper's Host and Prophecy. See [Phase 0 findings](#phase-0-findings) for how to detect them.
 - **Bungie keeps reorganizing the activity UI.** The Director was replaced by the Portal in The Edge of Fate (July 2025), and Wikipedia reports the Director returning in June 2026.
   - **Don't hardcode playlists or categories.** Model the data generically: activity → today's visible rewards.
@@ -148,7 +153,14 @@ No user accounts and no login. The README holds the public-facing scope.
 | Manifest index | `GET /Destiny2/Manifest/` |
 | Single definition lookup | `GET /Destiny2/Manifest/{entityType}/{hash}/`, e.g. `DestinyInventoryItemDefinition`, `DestinyActivityDefinition` |
 | Weekly public milestones | `GET /Destiny2/Milestones/` |
-| Public vendors (probably unused) | `GET /Destiny2/Vendors/` |
+| Public vendors (Xûr only) | `GET /Destiny2/Vendors/?components=400,402` |
+
+### Vendors (tested 2026-10-17)
+
+- **The public vendors endpoint returns only Xûr.** Every other vendor (Banshee and so on) can differ per character, so reading them needs OAuth as Bode. That's planned as a later task.
+- **Xûr publicly shows exotic armor names only,** e.g. Omnioculus and Peacekeepers. He shows up while he's in the game (Friday to Tuesday reset).
+  - No stats: the item stat components come back empty even when requested.
+  - No exotic weapons: those sit behind his "Strange Gear Offers" sub-vendor, which the public endpoint doesn't return.
 
 ### Key data shapes
 
@@ -209,8 +221,8 @@ Other notes:
 ## Architecture (planned)
 
 ```
-once a day, shortly after reset (17:00 UTC)
-  Firebase scheduled function (Python) ── Bungie API (Bode's profile)
+shortly after daily reset (17:00 UTC)
+  GitHub Actions scheduled workflow (Python) ── Bungie API (Bode's profile)
      ├─ writes today's bonus drops + featured raids to Firestore
      └─ sends FCM pushes to topics: weapon_<itemHash>, raid_<activityHash>
 
@@ -227,15 +239,41 @@ Flutter app (Android + iOS)
 | Folder | Contents |
 |---|---|
 | `phase0/` | Bungie API test script (#4) |
-| `backend/` | Firebase Cloud Functions, Python (#6, #7). Its Bungie code comes from the Phase 0 script. |
+| `backend/` | Python job run by GitHub Actions (#6, #7). Its Bungie code comes from the Phase 0 script. |
+| `.github/workflows/` | The scheduled workflow that runs `backend/` (#6) |
+| `firestore.rules` | Firestore security rules, pasted into the Firebase console (#5) |
 | `app/` | Flutter app (#8 onward) |
+
+### Firebase project
+
+- **Project:** "d2 loot alert", in Bode's **personal** Google account, separate from the other app. **Project ID: `d2-loot-alert`**.
+- **Set up in #5:**
+  - Firestore database (Standard edition, production mode) with the rules from `firestore.rules`
+  - FCM API (V1) enabled
+  - Admin SDK service-account key created; Bode's copy stays outside the repo
+  - GitHub secrets set
+- **Plan: Spark (free), no billing account.**
+  - Spark includes Firestore (with daily free quotas) and FCM.
+  - It does **not** include Cloud Functions, which is why the backend runs in GitHub Actions.
+- **App ID** for both Android and iOS: `com.id0.d2lootalert`. It's permanent once the app is in App Store Connect.
 
 ### Backend
 
-- Cloud Functions for Firebase (2nd gen), Python runtime, as a scheduled function.
-  - Scheduled functions need the **Blaze** (pay-as-you-go) plan. Set a budget alert. Expected usage is within the free tier.
-- The Bungie API key is stored as a Functions secret.
-- **Reset ID:** the timestamp of the most recent 17:00 UTC reset. Stored in Firestore so each reset is processed and notified **once**, even if the function runs more than once.
+- **Runs in GitHub Actions** on a cron schedule, which is in UTC.
+  - Free for public repos.
+  - Each run's logs are in the repo's Actions tab.
+  - Avoid scheduling at :00, when GitHub is busiest and most likely to delay runs.
+  - **Schedule (decided):** one run about 5 minutes after reset, plus two backups about 1 and 4 hours later, e.g. 17:07, 18:07 and 21:07 UTC.
+    - The backups cover GitHub delays, Bungie API outages around reset, and late arrivals like Trials.
+    - They only alert on anything not already sent for the current reset.
+    - Tuesday's reset is also a daily reset, so the same schedule covers the weekly check.
+- **Secrets** (repo → Settings → Secrets and variables → Actions):
+  - `BUNGIE_API_KEY`
+  - `BUNGIE_NAME`
+  - `FIREBASE_SERVICE_ACCOUNT` (the whole service-account JSON)
+- **Writes Firestore and sends FCM** with the Firebase Admin SDK (`firebase-admin`), authenticated by the service account. The Admin SDK bypasses security rules.
+- **Keep-alive:** GitHub disables scheduled workflows in public repos after 60 days without repository activity. #6 adds a step that prevents this.
+- **Reset ID:** the timestamp of the most recent 17:00 UTC reset. Stored in Firestore so each reset is processed and notified **once**, even if the job runs more than once.
 - **Firestore layout** (draft, finalize in #6):
 
   | Path | Holds |
@@ -245,7 +283,7 @@ Flutter app (Android + iOS)
   | `lootPools/{activityHash}` | the activity's weapons, from its definition's `rewards` |
   | `meta/state` | last processed daily and weekly reset IDs |
 
-- **Security rules:** apps can read; only the backend (Admin SDK) can write.
+- **Security rules** (`firestore.rules`): anyone can read, nobody can write. The backend writes through the Admin SDK, which ignores rules.
 
 ### Push notifications
 
@@ -253,7 +291,7 @@ Flutter app (Android + iOS)
   - `weapon_<itemHash>`
   - `raid_<activityHash>` (dungeons use this too)
 - **One message per weapon per reset,** naming every activity where it's the focus, e.g. "Spare Rations is today's bonus drop in Gambit." Variants like Customize and Matchmade share a focus, so group them first.
-- **iOS** needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode.
+- **iOS** needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
 - **Watch types are simplified** to "weapon, in any activity" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
 ### App (Flutter)
@@ -270,30 +308,31 @@ Flutter app (Android + iOS)
 | # | Task | Size | Status |
 |---|---|---|---|
 | #3 | Update README and CLAUDE.md for iOS and the new architecture | S | Done |
-| #4 | Phase 0: Bungie API test script (Python) | M | In review |
-| #5 | Firebase project setup | S | Backlog |
-| #6 | Backend: daily rotation job | M | Backlog |
+| #4 | Phase 0: Bungie API test script (Python) | M | Done |
+| #5 | Firebase project setup (Spark plan, GitHub secrets) | S | In progress |
+| #6 | Backend: daily rotation job (GitHub Actions) | M | Backlog |
 | #7 | Backend: push notifications for bonus drops and featured raids | S | Backlog |
 | #8 | Flutter app setup and Today screen | M | Backlog |
 | #9 | Watch screens: browse loot pools and raids, toggle alerts | M | Backlog |
 | #10 | Release: Android APK and iOS TestFlight | M | Backlog |
 | later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
+| #13 | Xûr alerts: exotic armor he's selling (names only, no login), after #7 | S | Backlog |
+| later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
 
 All Phase 0 questions are answered; see [Phase 0 findings](#phase-0-findings).
 
 **Still open (minor):**
 
-- Does Trials of Osiris show a bonus focus while it's live?
-- Does Crucible's focus move between modes?
+- Does Gambit's focus sometimes repeat across resets?
 - Which "Vanguard Op" type is Fireteam Ops and which is Pinnacle Ops?
 
 Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-- **#4** (branch `task_4_phase0_api_test`): Phase 0 script and findings. In review.
-- **Next:** #5, Firebase project setup.
+- **#5** (branch `task_5_firebase_setup`): Firebase setup on the Spark plan, plus GitHub secrets. In progress.
+- **Next:** #6, the GitHub Actions daily rotation job.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
 ## Decision log
@@ -315,3 +354,9 @@ Watch these in the daily snapshots once #6 runs.
 - **2026-10-17:** Phase 0 **confirmed one profile serves everyone** for weapon bonus focus.
 - **2026-10-17:** **Loot pools come from `DestinyActivityDefinition.rewards`,** not from building up history.
 - **2026-10-17:** **Featured raids and dungeons** = Raid or Dungeon activities with a non-empty `challenges` list. This replaces the idea of a hardcoded rotation cycle.
+- **2026-10-17:** ~~Firebase scheduled Cloud Function on the Blaze plan.~~ Superseded the same day: Bode wants to stay on the free Spark plan, which has no Cloud Functions.
+- **2026-10-17:** **The backend runs in GitHub Actions** (scheduled Python job) and writes to Firebase on the Spark plan with a service-account key. Free, needs no card, and reuses the Phase 0 code directly.
+- **2026-10-17:** App ID `com.id0.d2lootalert`. The Firebase project lives in Bode's personal Google account.
+- **2026-10-17:** Vendor weapon alerts are a later task (they need OAuth). Xûr's exotic armor alerts are task #13, after #7.
+- **2026-10-17:** Backend schedule: one run shortly after reset plus two backup runs, with alerts sent only once per reset.
+- **2026-10-17:** App registration and the APNs key moved from #5 to #8, where `flutterfire configure` handles registration.

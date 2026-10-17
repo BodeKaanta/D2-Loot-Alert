@@ -27,8 +27,8 @@ The app is planned to:
 
 ```
  once a day, shortly after reset
-   scheduled cloud function ──► Bungie.net API
-        │                       (today's activities and their visible rewards)
+   scheduled GitHub Actions job ──► Bungie.net API
+        │                           (today's activities and their visible rewards)
         ├──► saves today's rotation to a database
         └──► sends a push notification to everyone watching
              each bonus-focus weapon or featured raid
@@ -48,7 +48,7 @@ The app is planned to:
 | Area | Choice |
 |---|---|
 | App | Flutter (Android + iOS), with a custom design |
-| Backend | Cloud Functions for Firebase (Python), scheduled |
+| Backend | Python job on a GitHub Actions schedule (free, no server to run) |
 | Database | Cloud Firestore |
 | Notifications | Firebase Cloud Messaging (topics) |
 | Data source | Bungie.net Platform API |
@@ -72,9 +72,10 @@ The app is planned to:
 | Task | Goal | Status |
 |---|---|---|
 | Phase 0: API test | Script that pulls live data and confirms how bonus focus and featured raids appear in the API | Done |
-| Firebase setup | Project, push notifications for Android and iOS, database | Not started |
+| Firebase setup | Project on the free plan, database, backend secrets | Done |
 | Daily rotation job | Scheduled function that saves each day's rotation | Not started |
 | Push notifications | Alerts for bonus focus weapons and featured raids | Not started |
+| Xûr alerts | Alerts when Xûr sells an exotic armor piece you want | Not started |
 | App: Today screen | Flutter app with a custom look, showing today's rotation | Not started |
 | App: watch screens | Browse loot pools and raids, toggle alerts | Not started |
 | Release | Android APK and iOS TestFlight | Not started |
@@ -83,7 +84,7 @@ Work is tracked on the [project board](https://github.com/users/BodeKaanta/proje
 
 ## Building
 
-Coming soon. You'll need Flutter, a Firebase project and your own Bungie API key from [bungie.net/en/Application](https://www.bungie.net/en/Application). The key is stored as a Firebase secret and never committed.
+Coming soon. You'll need Flutter, a Firebase project and your own Bungie API key from [bungie.net/en/Application](https://www.bungie.net/en/Application). The key is stored as a GitHub Actions secret and never committed.
 
 ## Disclaimer
 

@@ -1,5 +1,8 @@
 # Secrets: never commit these (the repo is public)
 .env
+# Firebase service-account keys (default download name: <project>-firebase-adminsdk-<id>.json)
+*firebase-adminsdk*.json
+service-account*.json
 
 # Phase 0 output (raw API dumps)
 phase0/output/
