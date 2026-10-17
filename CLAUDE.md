@@ -114,15 +114,18 @@ No user accounts and no login. The README holds the public-facing scope.
 - **Bonus focus:** each activity features one boosted item per day, changing at daily reset.
   - In-game, the activity preview shows the specific weapon or armor icon.
   - A separate "Bonus Drop" appears as a generic green engram. That is a different thing.
-- **Bonus focus can depend on class.** For armor it does: on 2026-10-16, d2portal.com showed a hunter cloak for one activity and warlock robes for another.
-  - **Weapons are assumed to be the same for everyone.** The backend checks one profile (Bode's) and the result serves every user, so this must be confirmed in Phase 0 (#4).
+- **Bonus focus is class-specific only for armor.** Confirmed in Phase 0 on 2026-10-17:
+  - All 18 weapon focuses were identical on Bode's Warlock, Hunter and Titan, so **one profile serves everyone.**
+  - The 6 armor focuses were each class's version of the same set, e.g. Eutechnology Robes, Vest and Plate.
   - Armor bonus focus is out of scope for now.
-- **Featured raids and dungeons:** currently 2 raids and 2 dungeons per week. For the week of 2026-10-13 these were Vow of the Disciple and Last Wish, plus Vesper's Host and Prophecy.
+- **One activity often has several entries with the same focus:** "Customize" and "Matchmade", or "Normal" and "Master". Group them so a weapon gets one alert, not several.
+- **Crucible on 2026-10-17:** only Competitive had a bonus focus. Control, Supremacy and Rumble showed only the generic bonus engram. Trials of Osiris was listed (it was Saturday) but showed no rewards at all. Watch for a few days whether Crucible's focus moves between modes.
+- **Featured raids and dungeons:** currently 2 raids and 2 dungeons per week. For the week of 2026-10-13 these were Vow of the Disciple and Last Wish, plus Vesper's Host and Prophecy. See [Phase 0 findings](#phase-0-findings) for how to detect them.
 - **Bungie keeps reorganizing the activity UI.** The Director was replaced by the Portal in The Edge of Fate (July 2025), and Wikipedia reports the Director returning in June 2026.
   - **Don't hardcode playlists or categories.** Model the data generically: activity → today's visible rewards.
 - **Example: Gambit's pool** includes Spare Rations, Gnawing Hunger and Bug-Out Bag (Bode's example).
 - **Cross-check sites:**
-  - https://www.d2portal.com/today shows per-activity focus rewards and needs no login. It probably uses the same API data we plan to use.
+  - https://www.d2portal.com/today shows per-activity focus rewards and needs no login. On 2026-10-17 it matched our Phase 0 data exactly. It groups activities as Solo Ops, Fireteam Ops and Pinnacle Ops, and doesn't list Gambit or Crucible.
   - https://kyberscorner.com/this-week-in-destiny-2/ lists weekly featured raids and dungeons.
 
 ## Bungie API notes
@@ -133,7 +136,8 @@ No user accounts and no login. The README holds the public-facing scope.
 - **Spec:** https://github.com/Bungie-net/api (`openapi.json`).
   - Version 2.21.9, last commit 2025-12-02 ("Update for Renegades").
   - Portal activity fields were added in October 2025.
-- **Privacy:** CharacterActivities (component 204) can be read **without OAuth** if the profile's progression is set to public. Bode believes theirs already is; confirm in Phase 0.
+- **Privacy:** CharacterActivities (component 204) can be read **without OAuth**. Confirmed 2026-10-17 with Bode's "Show my progression" turned on.
+  - Quirk: the response still labels the component `privacy: 2` (Private) while returning the data. Check whether `data` is present instead of trusting the label.
 
 ### Endpoints we expect to use (all API-key only)
 
@@ -159,13 +163,46 @@ No user accounts and no login. The README holds the public-facing scope.
     - `displayBehavior`: enum `DestinyActivityRewardDisplayMode` (Aggregate=0, PickFirst=1, Count=2)
     - `rewardItems[]`: each has `itemQuantity { itemHash, quantity }` and `uiStyle` (string)
 
-**Main hypothesis (UNVERIFIED):** the bonus focus is an entry in `visibleRewards`, told apart by its `uiStyle` string. Phase 0 confirms this.
+### Phase 0 findings
+
+Verified on 2026-10-17 against d2portal.com and Kyber's Corner. Raw data is in `phase0/output/` after a run.
+
+- **Bonus focus:** the `visibleRewards[].rewardItems[]` entries with `uiStyle == "daily_grind_guaranteed"`.
+- **Other `uiStyle` values:**
+  - `"extra_engram"` is the generic "Ops Bonus Drop" green engram.
+  - `""` marks generic previews such as "Powerful Gear", "Raid Gear" and "Deepsight Weapon".
+- **Same on every character?** Yes for weapons. Armor is each class's version of the same set.
+- **Loot pool: `DestinyActivityDefinition.rewards` lists the full pool.**
+  - It includes weapons, armor and engram placeholders. Filter to weapons with `itemType == 3`.
+  - It's static game data, so the Browse screen can show complete pools from day one.
+  - Example: Gambit's pool includes Spare Rations, Gnawing Hunger, Bug-Out Bag and Last Man Standing.
+  - Control and Competitive share the same Crucible pool.
+- **Activity category:** look up `activityTypeHash` in `DestinyActivityTypeDefinition`.
+
+  | Type | Hash |
+  |---|---|
+  | Raid | `2043403989` |
+  | Dungeon | `608898761` |
+  | The Crucible | `4088006058` |
+  | Gambit | `248695599` |
+  | Solo Ops | `3851289711` |
+  | Vanguard Op | `1996806804` and `2009300208` |
+
+  - The two "Vanguard Op" types are Fireteam Ops and Pinnacle Ops; which is which isn't settled yet.
+  - `directActivityModeType` is missing on newer activities such as Vesper's Host and The Desert Perpetual, so don't rely on it.
+- **Featured raids and dungeons:** activities whose type is Raid or Dungeon **and** whose `challenges` list isn't empty.
+  - This matched Kyber's Corner exactly: Vow of the Disciple, Last Wish, Prophecy and Vesper's Host.
+  - The newest raid (The Desert Perpetual) and dungeon (Equilibrium) also have a challenge every week, because they're always available.
+  - Backup for raids only: public milestones list every raid, but only the featured ones have `challengeObjectiveHashes`. Dungeons aren't in milestones.
+- **`isFocusedActivity`** marks the Portal's featured carousel, **not** the bonus focus. Sparrow Racing League and the Warden of Nothing GM have a bonus focus but the flag is false.
+- **Scale:** each character has 180–230 available activities, about 130 of which show rewards. 24 had a bonus focus on 2026-10-17.
 
 Other notes:
 
 - The docs warn that 204 data "can be unfortunately problematic and relatively unreliable." Parse defensively: treat every field as optional, and never crash on missing fields.
-- `DestinyActivityDefinition.rewards` holds tooltip-style rewards, often placeholder items rather than real drops. It may or may not be usable as a loot pool.
-- **Name lookups:** the full manifest is large. Look up individual hashes with the single-definition endpoint; a day's run needs only a few dozen.
+- **Name lookups:** the full manifest is large, so look up individual hashes with the single-definition endpoint.
+  - The first Phase 0 run made about 300 lookups and took about 85 seconds; the cache makes reruns fast.
+  - The backend should cache definitions too, in Firestore or a downloaded activity table. Decide in #6.
 - **Item icons** are relative paths. Prefix them with `https://www.bungie.net`.
 - **Rate limits:** a few requests per day are far below any limit.
 
@@ -205,7 +242,7 @@ Flutter app (Android + iOS)
   |---|---|
   | `rotation/current` | today's activities with their bonus focus items (name, icon, hash), plus this week's featured raids and dungeons |
   | `history/{resetId}` | a copy of each day's snapshot |
-  | `lootPools/{activityHash}` | every item seen as that activity's bonus focus, which builds the loot pool over time |
+  | `lootPools/{activityHash}` | the activity's weapons, from its definition's `rewards` |
   | `meta/state` | last processed daily and weekly reset IDs |
 
 - **Security rules:** apps can read; only the backend (Admin SDK) can write.
@@ -215,7 +252,7 @@ Flutter app (Android + iOS)
 - FCM **topics**, so the server never stores user data:
   - `weapon_<itemHash>`
   - `raid_<activityHash>` (dungeons use this too)
-- The message names the activity, e.g. "Spare Rations is today's bonus drop in Gambit."
+- **One message per weapon per reset,** naming every activity where it's the focus, e.g. "Spare Rations is today's bonus drop in Gambit." Variants like Customize and Matchmade share a focus, so group them first.
 - **iOS** needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode.
 - **Watch types are simplified** to "weapon, in any activity" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
@@ -232,8 +269,8 @@ Flutter app (Android + iOS)
 
 | # | Task | Size | Status |
 |---|---|---|---|
-| #3 | Update README and CLAUDE.md for iOS and the new architecture | S | In progress |
-| #4 | Phase 0: Bungie API test script (Python) | M | Backlog |
+| #3 | Update README and CLAUDE.md for iOS and the new architecture | S | Done |
+| #4 | Phase 0: Bungie API test script (Python) | M | In review |
 | #5 | Firebase project setup | S | Backlog |
 | #6 | Backend: daily rotation job | M | Backlog |
 | #7 | Backend: push notifications for bonus drops and featured raids | S | Backlog |
@@ -243,20 +280,21 @@ Flutter app (Android + iOS)
 | later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
 
-**Phase 0 (#4) must answer these questions:**
+All Phase 0 questions are answered; see [Phase 0 findings](#phase-0-findings).
 
-- How does the bonus focus appear in `visibleRewards`? Which `uiStyle` values show up?
-- Are Gambit, each Crucible mode and Trials separate activities with their own rewards?
-- **Is the weapon bonus focus the same on every character?** The one-profile backend depends on this.
-- Does any API data list an activity's full loot pool, or must we build it from observed history?
-- How are featured raids and dungeons detected? Candidates: `isFocusedActivity`, public milestones, or the rewards on raid activities. If none work, fall back to a known rotation cycle anchored to a known date.
-- Is component 204 readable without OAuth for Bode's profile?
+**Still open (minor):**
+
+- Does Trials of Osiris show a bonus focus while it's live?
+- Does Crucible's focus move between modes?
+- Which "Vanguard Op" type is Fireteam Ops and which is Pinnacle Ops?
+
+Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-- **#3** (branch `task_3_update_docs_for_ios`): this docs update. In review.
-- **Next:** #4, the Phase 0 API test script.
-  - Bode needs a Bungie API key (bungie.net/en/Application) and their Bungie name with its number (`Name#1234`).
+- **#4** (branch `task_4_phase0_api_test`): Phase 0 script and findings. In review.
+- **Next:** #5, Firebase project setup.
+- **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
 ## Decision log
 
@@ -274,3 +312,6 @@ Flutter app (Android + iOS)
 - **2026-10-17:** **FCM topics instead of user records.** No accounts, and no per-user data on the server.
 - **2026-10-17:** Watch types simplified to "weapon, in any activity" plus "raid or dungeon."
 - **2026-10-17:** The Phase 0 script is in **Python**, so its code can carry over to the Python backend.
+- **2026-10-17:** Phase 0 **confirmed one profile serves everyone** for weapon bonus focus.
+- **2026-10-17:** **Loot pools come from `DestinyActivityDefinition.rewards`,** not from building up history.
+- **2026-10-17:** **Featured raids and dungeons** = Raid or Dungeon activities with a non-empty `challenges` list. This replaces the idea of a hardcoded rotation cycle.
