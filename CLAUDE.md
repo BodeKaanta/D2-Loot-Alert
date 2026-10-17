@@ -250,7 +250,9 @@ Flutter app (Android + iOS)
 - **Set up in #5:**
   - Firestore database (Standard edition, production mode) with the rules from `firestore.rules`
   - FCM API (V1) enabled
-  - Admin SDK service-account key and GitHub secrets: made for the GitHub Actions plan, **now unused**. Delete them; Cloud Functions use the project's own credentials.
+  - The rules paste in #5 never actually got published; the console still had the deny-all default. Since #6 the rules are deployed from the repo with `firebase deploy --only firestore:rules`. A change takes about a minute to apply.
+  - Admin SDK service-account key and GitHub secrets: made for the GitHub Actions plan and **removed on 2026-10-17**. The GitHub secrets and Bode's key file were deleted, and the key itself is revoked under IAM & Admin → Service Accounts → `firebase-adminsdk-fbsvc` → Keys.
+    - **Never delete the service accounts themselves.** `firebase-adminsdk-fbsvc` is Firebase's, `…-compute@developer` is what the function runs as, and `…@appspot` is a Google default.
 - **Plan: Blaze (pay-as-you-go), chosen in #6.** Cloud Functions need it. Bode doesn't want to be billed, so keep usage far inside the free allowances:
 
   | Service | Our use | Free allowance |
@@ -277,7 +279,9 @@ Flutter app (Android + iOS)
   - **Schedule:** cron `7 17,18,21 * * *` in UTC. That's 17:07, a few minutes after reset, plus backups at 18:07 and 21:07. The backups cover Bungie API outages around reset and late arrivals like Trials. Tuesday's reset is also a daily reset, so the same schedule covers the weekly check.
   - **Timeout** 540 s, **memory** 512 MB. A normal run takes seconds; rebuilding loot pools after a game update takes about 2–3 minutes.
   - **Logs:** Firebase console → Functions → `daily_rotation` → Logs, or Google Cloud Logging.
-  - **Test without waiting for reset:** Google Cloud console → Cloud Scheduler → the function's job → **Force run**.
+  - **Test without waiting for reset:** Google Cloud console → Cloud Scheduler → job `firebase-schedule-daily_rotation-us-central1` → ⋮ → **Force run**. (`gcloud` isn't installed on Bode's PC.)
+  - **Check results without credentials:** Firestore allows public reads, so `GET https://firestore.googleapis.com/v1/projects/d2-loot-alert/databases/(default)/documents/rotation/current` works. `meta/state` is written last, so if it has a fresh `lastRunAt`, the whole run succeeded.
+  - **The function's URL is private.** Unauthenticated calls get 403; only Cloud Scheduler can invoke it. Keep it that way. Never make the invoker public, or strangers could trigger runs.
 - **Secrets** (Cloud Secret Manager, set with `firebase functions:secrets:set <NAME>`):
   - `BUNGIE_API_KEY`
   - `BUNGIE_NAME`
@@ -289,6 +293,11 @@ Flutter app (Android + iOS)
 - **Deploy** (from the repo root):
   1. One time: `python -m venv backend/venv` then `backend/venv/Scripts/pip install -r backend/requirements.txt`. The CLI reads the functions from this venv.
   2. `firebase deploy --only functions`
+- **Deploy gotchas** (all from the first deploy on 2026-10-17):
+  - **"Failed to list functions" right after Firebase enables the Cloud Functions API** is a propagation delay. Wait a minute or two and retry.
+  - **`firebase functions:secrets:set` can leave a secret with no value.** Check with `firebase functions:secrets:get <NAME>`, which should list an ENABLED version. To set one from `.env` without the prompt: `grep '^NAME=' phase0/.env | cut -d= -f2- | tr -d '\r\n' | firebase functions:secrets:set NAME --data-file -`.
+  - **The first deploy configured the Artifact Registry cleanup policy** (delete images older than 1 day) by itself, so `functions:artifacts:setpolicy` wasn't needed.
+  - **When Claude deploys,** use `--non-interactive --force` because its shell can't answer prompts. `--force` only bypasses prompts here; there are no other functions it could delete.
 - **Idempotent:** each run for the same reset overwrites the same documents. **Reset ID** is the date of the most recent 17:00 UTC reset, e.g. `2026-10-17`.
 - **Firestore layout** (finalized in #6):
 
@@ -332,7 +341,7 @@ Flutter app (Android + iOS)
 | #3 | Update README and CLAUDE.md for iOS and the new architecture | S | Done |
 | #4 | Phase 0: Bungie API test script (Python) | M | Done |
 | #5 | Firebase project setup | S | Done |
-| #6 | Backend: daily rotation job (Cloud Function) | M | In progress |
+| #6 | Backend: daily rotation job (Cloud Function) | M | In review (deployed) |
 | #7 | Backend: push notifications for bonus drops and featured raids | S | Backlog |
 | #8 | Flutter app setup and Today screen | M | Backlog |
 | #9 | Watch screens: browse loot pools and raids, toggle alerts | M | Backlog |
@@ -353,7 +362,10 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-- **#6** (branch `task_6_daily_rotation_job`): the Cloud Function is written, and a dry run against live data passed. Waiting on Bode to upgrade to Blaze and add the personal account to the Firebase CLI, then set secrets, deploy and verify one run.
+- **#6** (branch `task_6_daily_rotation_job`): **deployed and verified on 2026-10-17.**
+  - A forced run wrote `rotation/current` (15 activities, 7 featured), `history/2026-10-17`, 74 `lootPools` and `meta/state`.
+  - First scheduled run: 2026-10-18 at 17:07 UTC.
+  - PR in review.
 - **Next:** #7, push notifications.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 

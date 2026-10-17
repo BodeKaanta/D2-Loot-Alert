@@ -73,7 +73,7 @@ The app is planned to:
 |---|---|---|
 | Phase 0: API test | Script that pulls live data and confirms how bonus focus and featured raids appear in the API | Done |
 | Firebase setup | Project on the free plan, database, backend secrets | Done |
-| Daily rotation job | Scheduled function that saves each day's rotation | Not started |
+| Daily rotation job | Scheduled function that saves each day's rotation | Done |
 | Push notifications | Alerts for bonus focus weapons and featured raids | Not started |
 | Xûr alerts | Alerts when Xûr sells an exotic armor piece you want | Not started |
 | App: Today screen | Flutter app with a custom look, showing today's rotation | Not started |
