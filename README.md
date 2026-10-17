@@ -21,7 +21,7 @@ The app is planned to:
 - **Watch a weapon** and get a push notification on the day it's a bonus focus drop, naming the activity.
 - **Watch raids and dungeons** and get a notification in the week they're featured.
 - **Show a Today screen** with every activity's current bonus focus and this week's featured raids and dungeons.
-- **Keep a rotation history** of every bonus focus seen, which fills in loot pools over time.
+- **Keep a rotation history** of every bonus focus seen.
 
 ## How it works
 
@@ -71,7 +71,7 @@ The app is planned to:
 
 | Task | Goal | Status |
 |---|---|---|
-| Phase 0: API test | Script that pulls live data and confirms how bonus focus and featured raids appear in the API | Not started |
+| Phase 0: API test | Script that pulls live data and confirms how bonus focus and featured raids appear in the API | Done |
 | Firebase setup | Project, push notifications for Android and iOS, database | Not started |
 | Daily rotation job | Scheduled function that saves each day's rotation | Not started |
 | Push notifications | Alerts for bonus focus weapons and featured raids | Not started |

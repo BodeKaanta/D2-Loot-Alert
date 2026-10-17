@@ -1,0 +1,9 @@
+# Secrets: never commit these (the repo is public)
+.env
+
+# Phase 0 output (raw API dumps)
+phase0/output/
+
+# Python
+__pycache__/
+.venv/
