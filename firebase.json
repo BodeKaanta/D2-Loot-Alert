@@ -1,0 +1,13 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "functions": [
+    {
+      "source": "backend",
+      "codebase": "default",
+      "runtime": "python311",
+      "ignore": ["venv", "output", "__pycache__", ".env*"]
+    }
+  ]
+}
