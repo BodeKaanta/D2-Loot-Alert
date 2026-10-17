@@ -27,8 +27,8 @@ The app is planned to:
 
 ```
  once a day, shortly after reset
-   scheduled GitHub Actions job ──► Bungie.net API
-        │                           (today's activities and their visible rewards)
+   scheduled cloud function ──► Bungie.net API
+        │                       (today's activities and their visible rewards)
         ├──► saves today's rotation to a database
         └──► sends a push notification to everyone watching
              each bonus-focus weapon or featured raid
@@ -48,7 +48,7 @@ The app is planned to:
 | Area | Choice |
 |---|---|
 | App | Flutter (Android + iOS), with a custom design |
-| Backend | Python job on a GitHub Actions schedule (free, no server to run) |
+| Backend | Cloud Functions for Firebase (Python), on a schedule |
 | Database | Cloud Firestore |
 | Notifications | Firebase Cloud Messaging (topics) |
 | Data source | Bungie.net Platform API |
@@ -84,7 +84,7 @@ Work is tracked on the [project board](https://github.com/users/BodeKaanta/proje
 
 ## Building
 
-Coming soon. You'll need Flutter, a Firebase project and your own Bungie API key from [bungie.net/en/Application](https://www.bungie.net/en/Application). The key is stored as a GitHub Actions secret and never committed.
+Coming soon. You'll need Flutter, a Firebase project and your own Bungie API key from [bungie.net/en/Application](https://www.bungie.net/en/Application). The key is stored in Cloud Secret Manager and never committed.
 
 ## Disclaimer
 

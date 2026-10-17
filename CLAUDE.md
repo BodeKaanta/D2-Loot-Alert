@@ -11,7 +11,7 @@ Read this whole file before doing anything in this repo. It is the shared memory
 1. **Never write code on `main`.** All work happens on a task branch. Before editing any file, run `git branch --show-current`. If it says `main`, stop and switch to (or create) the branch for the current task.
 2. **Bode reviews all code before it is committed.** The loop for every change is:
    1. Write the change.
-   2. Show Bode the new or changed code and explain how it works. Go into more detail on the parts that are new to Bode: the Firebase backend, GitHub Actions, push notification setup, and Flutter or Dart patterns beyond the basics.
+   2. Show Bode the new or changed code and explain how it works. Go into more detail on the parts that are new to Bode: the Firebase backend, Cloud Functions, push notification setup, and Flutter or Dart patterns beyond the basics.
    3. Answer any questions and fix any logic issues Bode spots.
    4. Wait for explicit approval.
    5. Commit, then push.
@@ -20,8 +20,8 @@ Read this whole file before doing anything in this repo. It is the shared memory
 3. **Never merge pull requests.** No `gh pr merge`, no merging into `main` locally and no pushing to `main`. You may commit and push to working branches and open PRs. Bode always has the final say on merges.
 4. **Every feature or problem gets a task on the kanban board,** assigned to Bode (`BodeKaanta`) with a size of S, M or L. Use **one branch per task.** See [Task workflow](#task-workflow).
 5. **Never commit secrets. The repo is public.**
-   - The Bungie API key lives in a gitignored `.env` file locally and in a GitHub Actions secret for the backend.
-   - Never commit Firebase service-account keys (JSON files containing `private_key`). The backend's key lives only in the `FIREBASE_SERVICE_ACCOUNT` GitHub secret, and Bode's downloaded copy stays outside the repo folder.
+   - The Bungie API key lives in a gitignored `.env` file locally and in Cloud Secret Manager for the backend.
+   - Never commit Firebase service-account keys (JSON files containing `private_key`). The backend doesn't need one; Cloud Functions use the project's own credentials.
    - The Firebase client config files (`google-services.json`, `GoogleService-Info.plist`, `firebase_options.dart`) aren't secrets, but decide in #8 whether to commit them.
    - Check the diff for keys before every commit.
 6. **No force-pushes, history rewriting on pushed branches or skipped hooks** (`--no-verify`).
@@ -222,7 +222,7 @@ Other notes:
 
 ```
 shortly after daily reset (17:00 UTC)
-  GitHub Actions scheduled workflow (Python) ── Bungie API (Bode's profile)
+  scheduled Cloud Function (Python) ── Bungie API (Bode's profile)
      ├─ writes today's bonus drops + featured raids to Firestore
      └─ sends FCM pushes to topics: weapon_<itemHash>, raid_<activityHash>
 
@@ -239,9 +239,9 @@ Flutter app (Android + iOS)
 | Folder | Contents |
 |---|---|
 | `phase0/` | Bungie API test script (#4) |
-| `backend/` | Python job run by GitHub Actions (#6, #7). Its Bungie code comes from the Phase 0 script. |
-| `.github/workflows/` | The scheduled workflow that runs `backend/` (#6) |
-| `firestore.rules` | Firestore security rules, pasted into the Firebase console (#5) |
+| `backend/` | Cloud Functions source, Python (#6, #7). `main.py` is the scheduled function, `rotation.py` the logic, `bungie.py` the API client (from Phase 0). |
+| `firebase.json`, `.firebaserc` | Firebase CLI config: functions source and runtime, rules file, default project `d2-loot-alert` |
+| `firestore.rules` | Firestore security rules, deployed with `firebase deploy --only firestore:rules` |
 | `app/` | Flutter app (#8 onward) |
 
 ### Firebase project
@@ -250,38 +250,60 @@ Flutter app (Android + iOS)
 - **Set up in #5:**
   - Firestore database (Standard edition, production mode) with the rules from `firestore.rules`
   - FCM API (V1) enabled
-  - Admin SDK service-account key created; Bode's copy stays outside the repo
-  - GitHub secrets set
-- **Plan: Spark (free), no billing account.**
-  - Spark includes Firestore (with daily free quotas) and FCM.
-  - It does **not** include Cloud Functions, which is why the backend runs in GitHub Actions.
+  - Admin SDK service-account key and GitHub secrets: made for the GitHub Actions plan, **now unused**. Delete them; Cloud Functions use the project's own credentials.
+- **Plan: Blaze (pay-as-you-go), chosen in #6.** Cloud Functions need it. Bode doesn't want to be billed, so keep usage far inside the free allowances:
+
+  | Service | Our use | Free allowance |
+  |---|---|---|
+  | Cloud Functions (Cloud Run) | 3 short runs a day | 2M requests, 180k vCPU-seconds, 360k GiB-seconds a month |
+  | Cloud Scheduler | 1 job (one cron with 3 times) | 3 jobs per billing account |
+  | Secret Manager | 2 secrets | 6 active secret versions, 10k accesses a month |
+  | Firestore | a handful of writes per run; app reads | 50k reads, 20k writes a day |
+  | Artifact Registry | build images from deploys | 0.5 GB storage, kept low by a cleanup policy |
+  | FCM | pushes | free |
+
+  - **Budget alert at $1.** It emails; it doesn't cap spending.
+  - **Run `firebase functions:artifacts:setpolicy` once** after the first deploy, so old build images get deleted.
+  - **Don't add** Firestore-triggered functions that write to Firestore (they can loop), or anything that runs constantly.
+  - **Worst realistic case** is someone hammering the public Firestore reads past 50k a day. That costs pennies per 100k reads, and the budget alert would flag it. App Check can lock reads to the real app later if needed.
+  - **Free trial:** if Google attached its $300 / 90-day free trial to the billing account, the account must be upgraded to a full (paid) account before the trial ends, or Google stops the project.
+- **CLI account:** Bode's Firebase CLI defaults to the other app's Google account. In this repo, use the personal account, added with `firebase login:add` and selected with `firebase login:use <email>`.
 - **App ID** for both Android and iOS: `com.id0.d2lootalert`. It's permanent once the app is in App Store Connect.
 
 ### Backend
 
-- **Runs in GitHub Actions** on a cron schedule, which is in UTC.
-  - Free for public repos.
-  - Each run's logs are in the repo's Actions tab.
-  - Avoid scheduling at :00, when GitHub is busiest and most likely to delay runs.
-  - **Schedule (decided):** one run about 5 minutes after reset, plus two backups about 1 and 4 hours later, e.g. 17:07, 18:07 and 21:07 UTC.
-    - The backups cover GitHub delays, Bungie API outages around reset, and late arrivals like Trials.
-    - They only alert on anything not already sent for the current reset.
-    - Tuesday's reset is also a daily reset, so the same schedule covers the weekly check.
-- **Secrets** (repo → Settings → Secrets and variables → Actions):
+- **A scheduled Cloud Function** (2nd gen, Python 3.11 to match Bode's local Python), `daily_rotation` in `backend/main.py`, region us-central1 (the default).
+  - **Don't pass `timezone=`** to `on_schedule`. It needs a time-zone database that Windows lacks, which breaks `firebase deploy` from Bode's PC. The CLI already defaults 2nd-gen schedules to UTC (`DEFAULT_TIME_ZONE_V2` in firebase-tools).
+  - **Schedule:** cron `7 17,18,21 * * *` in UTC. That's 17:07, a few minutes after reset, plus backups at 18:07 and 21:07. The backups cover Bungie API outages around reset and late arrivals like Trials. Tuesday's reset is also a daily reset, so the same schedule covers the weekly check.
+  - **Timeout** 540 s, **memory** 512 MB. A normal run takes seconds; rebuilding loot pools after a game update takes about 2–3 minutes.
+  - **Logs:** Firebase console → Functions → `daily_rotation` → Logs, or Google Cloud Logging.
+  - **Test without waiting for reset:** Google Cloud console → Cloud Scheduler → the function's job → **Force run**.
+- **Secrets** (Cloud Secret Manager, set with `firebase functions:secrets:set <NAME>`):
   - `BUNGIE_API_KEY`
   - `BUNGIE_NAME`
-  - `FIREBASE_SERVICE_ACCOUNT` (the whole service-account JSON)
-- **Writes Firestore and sends FCM** with the Firebase Admin SDK (`firebase-admin`), authenticated by the service account. The Admin SDK bypasses security rules.
-- **Keep-alive:** GitHub disables scheduled workflows in public repos after 60 days without repository activity. #6 adds a step that prevents this.
-- **Reset ID:** the timestamp of the most recent 17:00 UTC reset. Stored in Firestore so each reset is processed and notified **once**, even if the job runs more than once.
-- **Firestore layout** (draft, finalize in #6):
+- **Writes Firestore** (and, in #7, sends FCM) with the Firebase Admin SDK, using the function's built-in credentials. The Admin SDK bypasses security rules.
+- **Dependencies** (`backend/requirements.txt`, pinned): `firebase-functions` and `firebase-admin`. `rotation.py` and `bungie.py` use only the standard library, so the dry run needs nothing installed.
+- **Local test:** with `BUNGIE_API_KEY` and `BUNGIE_NAME` set, run `python backend/rotation.py --dry-run`. It writes to `backend/output/` (gitignored) instead of Firestore.
+  - Use plain `python`, not `python -I`, so `rotation.py` can import `bungie.py`.
+  - From Git Bash, load the env vars with `set -a; source <(tr -d '\r' < phase0/.env); set +a`.
+- **Deploy** (from the repo root):
+  1. One time: `python -m venv backend/venv` then `backend/venv/Scripts/pip install -r backend/requirements.txt`. The CLI reads the functions from this venv.
+  2. `firebase deploy --only functions`
+- **Idempotent:** each run for the same reset overwrites the same documents. **Reset ID** is the date of the most recent 17:00 UTC reset, e.g. `2026-10-17`.
+- **Firestore layout** (finalized in #6):
 
   | Path | Holds |
   |---|---|
-  | `rotation/current` | today's activities with their bonus focus items (name, icon, hash), plus this week's featured raids and dungeons |
-  | `history/{resetId}` | a copy of each day's snapshot |
-  | `lootPools/{activityHash}` | the activity's weapons, from its definition's `rewards` |
-  | `meta/state` | last processed daily and weekly reset IDs |
+  | `rotation/current` | `resetId`, `updatedAt`, `activities[]`, `featured[]` |
+  | `history/{resetId}` | a copy of each reset's last snapshot |
+  | `lootPools/{id}` | one activity group's weapons, from its definitions' `rewards`. Rebuilt only when the manifest version changes. |
+  | `meta/state` | `manifestVersion`, `lastResetId`, `lastRunAt` |
+
+  - An **activity group** has an `id` (e.g. `gambit-gambit`), `name`, `category`, `image`, `activityHashes[]` and `weapons[]`.
+    - The `id` is the slug of category + base name, so the Today screen's entries link to their loot pool by the same `id`.
+  - A **weapon** has `itemHash`, `name`, `type` and `icon` (a full URL).
+  - A **featured** entry has `id`, `name`, `kind` (`raid` or `dungeon`), `image` and `activityHashes[]`.
+  - The always-available newest raid (The Desert Perpetual, including its Epic version) and dungeon (Equilibrium) also show up as featured.
 
 - **Security rules** (`firestore.rules`): anyone can read, nobody can write. The backend writes through the Admin SDK, which ignores rules.
 
@@ -309,8 +331,8 @@ Flutter app (Android + iOS)
 |---|---|---|---|
 | #3 | Update README and CLAUDE.md for iOS and the new architecture | S | Done |
 | #4 | Phase 0: Bungie API test script (Python) | M | Done |
-| #5 | Firebase project setup (Spark plan, GitHub secrets) | S | In progress |
-| #6 | Backend: daily rotation job (GitHub Actions) | M | Backlog |
+| #5 | Firebase project setup | S | Done |
+| #6 | Backend: daily rotation job (Cloud Function) | M | In progress |
 | #7 | Backend: push notifications for bonus drops and featured raids | S | Backlog |
 | #8 | Flutter app setup and Today screen | M | Backlog |
 | #9 | Watch screens: browse loot pools and raids, toggle alerts | M | Backlog |
@@ -331,8 +353,8 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-- **#5** (branch `task_5_firebase_setup`): Firebase setup on the Spark plan, plus GitHub secrets. In progress.
-- **Next:** #6, the GitHub Actions daily rotation job.
+- **#6** (branch `task_6_daily_rotation_job`): the Cloud Function is written, and a dry run against live data passed. Waiting on Bode to upgrade to Blaze and add the personal account to the Firebase CLI, then set secrets, deploy and verify one run.
+- **Next:** #7, push notifications.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
 ## Decision log
@@ -355,7 +377,13 @@ Watch these in the daily snapshots once #6 runs.
 - **2026-10-17:** **Loot pools come from `DestinyActivityDefinition.rewards`,** not from building up history.
 - **2026-10-17:** **Featured raids and dungeons** = Raid or Dungeon activities with a non-empty `challenges` list. This replaces the idea of a hardcoded rotation cycle.
 - **2026-10-17:** ~~Firebase scheduled Cloud Function on the Blaze plan.~~ Superseded the same day: Bode wants to stay on the free Spark plan, which has no Cloud Functions.
-- **2026-10-17:** **The backend runs in GitHub Actions** (scheduled Python job) and writes to Firebase on the Spark plan with a service-account key. Free, needs no card, and reuses the Phase 0 code directly.
+- **2026-10-17:** ~~**The backend runs in GitHub Actions** (scheduled Python job) and writes to Firebase on the Spark plan with a service-account key.~~ Superseded on 2026-10-17.
+- **2026-10-17:** **Back to a scheduled Cloud Function on the Blaze plan.**
+  - GitHub's terms say Actions shouldn't be used "as part of a serverless application" and limit use to developing and testing software.
+  - GitHub staff disabled the popular keep-alive action's repo, so working around the 60-day pause isn't safe either.
+  - Bode accepted Blaze on the condition that bills stay very unlikely. See the free-allowance table under Firebase project.
+- **2026-10-17:** Python 3.11 runtime, matching Bode's local Python. Bungie API key and name stored in Cloud Secret Manager.
+- **2026-10-17:** Loot pools cover every available activity with weapons in its `rewards` (74 on 2026-10-17). They're rebuilt only when the manifest version changes.
 - **2026-10-17:** App ID `com.id0.d2lootalert`. The Firebase project lives in Bode's personal Google account.
 - **2026-10-17:** Vendor weapon alerts are a later task (they need OAuth). Xûr's exotic armor alerts are task #13, after #7.
 - **2026-10-17:** Backend schedule: one run shortly after reset plus two backup runs, with alerts sent only once per reset.

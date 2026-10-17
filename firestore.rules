@@ -1,6 +1,7 @@
 rules_version = '2';
 
-// Paste into Firebase console > Firestore Database > Rules, then Publish.
+// Deploy with: firebase deploy --only firestore:rules
+// (or paste into Firebase console > Firestore Database > Rules, then Publish).
 //
 // The app only ever reads (today's rotation, loot pools). All writes come from
 // the backend through the Admin SDK, which ignores these rules, so no client

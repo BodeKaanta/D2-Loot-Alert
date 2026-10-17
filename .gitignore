@@ -7,6 +7,14 @@ service-account*.json
 # Phase 0 output (raw API dumps)
 phase0/output/
 
+# Backend: local dry-run output and the virtualenv the Firebase CLI uses to deploy
+backend/output/
+backend/venv/
+
+# Firebase CLI
+.firebase/
+firebase-debug.log
+
 # Python
 __pycache__/
 .venv/
