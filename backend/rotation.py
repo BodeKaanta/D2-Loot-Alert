@@ -1,10 +1,10 @@
 """Daily rotation (issue #6): today's bonus focus weapons and this week's featured
-raids and dungeons, saved to Firestore for the app.
+raids and dungeons, saved to Firestore for the app, plus push alerts (#7).
 
-main.py runs this on a schedule. To test locally without touching Firestore
-(saves the results to backend/output/, which is gitignored):
+main.py runs this on a schedule. To test locally without touching Firestore or
+sending anything (saves the results to backend/output/, which is gitignored):
 
-    python backend/rotation.py --dry-run
+    python backend/rotation.py --dry-run [--skip-pools]
 
 with BUNGIE_API_KEY and BUNGIE_NAME set as environment variables.
 
@@ -18,6 +18,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import alerts
 from bungie import Bungie
 
 BONUS_FOCUS = "daily_grind_guaranteed"  # uiStyle of a bonus focus reward
@@ -34,6 +35,13 @@ def reset_id(now):
     Anything before 17:00 UTC still belongs to the previous day's reset.
     """
     return (now - timedelta(hours=RESET_HOUR_UTC)).date().isoformat()
+
+
+def week_id(now):
+    """The date of the most recent weekly reset (Tuesday 17:00 UTC), e.g. '2026-10-13'."""
+    reset_day = (now - timedelta(hours=RESET_HOUR_UTC)).date()
+    days_since_tuesday = (reset_day.weekday() - 1) % 7  # weekday(): Monday = 0, Tuesday = 1
+    return (reset_day - timedelta(days=days_since_tuesday)).isoformat()
 
 
 def base_name(definition):
@@ -178,11 +186,23 @@ def build_loot_pools(api, profile):
     return pools
 
 
-def run(api_key, bungie_name, db):
-    """One scheduled run: fetch today's rotation and save it to Firestore.
+def new_alerts(snapshot, state, now):
+    """The alerts not already sent this reset (weapons) or this week (raids and dungeons).
 
-    Every run for the same reset overwrites the same documents, so the backup
-    runs are always safe.
+    Returns (alerts to send, weapon topics already sent, raid topics already sent).
+    """
+    sent_weapons = set(state.get("sentWeaponTopics", [])) if state.get("sentResetId") == snapshot["resetId"] else set()
+    sent_raids = set(state.get("sentRaidTopics", [])) if state.get("sentWeekId") == week_id(now) else set()
+    to_send = ([a for a in alerts.weapon_alerts(snapshot) if a["topic"] not in sent_weapons]
+               + [a for a in alerts.raid_alerts(snapshot) if a["topic"] not in sent_raids])
+    return to_send, sent_weapons, sent_raids
+
+
+def run(api_key, bungie_name, db):
+    """One scheduled run: fetch today's rotation, save it to Firestore and send new alerts.
+
+    Every run for the same reset overwrites the same documents and skips alerts
+    that were already sent, so the backup runs are always safe.
     """
     now = datetime.now(timezone.utc)
     api = Bungie(api_key)
@@ -207,10 +227,19 @@ def run(api_key, bungie_name, db):
         batch.commit()
         print(f"Rebuilt {len(pools)} loot pools for manifest {manifest_version}")
 
+    to_send, sent_weapons, sent_raids = new_alerts(snapshot, state, now)
+    accepted = alerts.send(to_send)
+    print(f"Sent {len(accepted)} of {len(to_send)} new alerts")
+
     state_ref.set({
         "manifestVersion": manifest_version,
         "lastResetId": snapshot["resetId"],
         "lastRunAt": now.isoformat(),
+        # What has been alerted, so backup runs only send what's new.
+        "sentResetId": snapshot["resetId"],
+        "sentWeaponTopics": sorted(sent_weapons | {t for t in accepted if t.startswith("weapon_")}),
+        "sentWeekId": week_id(now),
+        "sentRaidTopics": sorted(sent_raids | {t for t in accepted if t.startswith("raid_")}),
     }, merge=True)
 
 
@@ -226,18 +255,25 @@ def dry_run():
         print(f"  {a['category']:14} {a['name']:28} {', '.join(w['name'] for w in a['weapons'])}")
     print("Featured: " + ", ".join(f"{f['name']} ({f['kind']})" for f in snapshot["featured"]))
 
-    print("Building loot pools (takes a few minutes)...")
-    pools = build_loot_pools(api, profile)
-    print(f"{len(pools)} loot pools")
+    to_send, _, _ = new_alerts(snapshot, {}, now)  # empty state: as if nothing was sent yet
+    print(f"Alerts that would be sent ({len(to_send)}):")
+    for alert in to_send:
+        print(f"  [{alert['topic']}] {alert['title']}" + (f" / {alert['body']}" if alert["body"] else ""))
 
     out = Path(__file__).parent / "output"
     out.mkdir(exist_ok=True)
     (out / "snapshot.json").write_text(json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
-    (out / "loot_pools.json").write_text(json.dumps(pools, indent=2, ensure_ascii=False), encoding="utf-8")
+    (out / "alerts.json").write_text(json.dumps(to_send, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if "--skip-pools" not in sys.argv:
+        print("Building loot pools (takes a few minutes)...")
+        pools = build_loot_pools(api, profile)
+        print(f"{len(pools)} loot pools")
+        (out / "loot_pools.json").write_text(json.dumps(pools, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Saved to {out}")
 
 
 if __name__ == "__main__":
     if "--dry-run" not in sys.argv:
-        sys.exit("Usage: python backend/rotation.py --dry-run")
+        sys.exit("Usage: python backend/rotation.py --dry-run [--skip-pools]")
     dry_run()

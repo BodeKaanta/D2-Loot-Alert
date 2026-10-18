@@ -306,7 +306,7 @@ Flutter app (Android + iOS)
   | `rotation/current` | `resetId`, `updatedAt`, `activities[]`, `featured[]` |
   | `history/{resetId}` | a copy of each reset's last snapshot |
   | `lootPools/{id}` | one activity group's weapons, from its definitions' `rewards`. Rebuilt only when the manifest version changes. |
-  | `meta/state` | `manifestVersion`, `lastResetId`, `lastRunAt` |
+  | `meta/state` | `manifestVersion`, `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`) |
 
   - An **activity group** has an `id` (e.g. `gambit-gambit`), `name`, `category`, `image`, `activityHashes[]` and `weapons[]`.
     - The `id` is the slug of category + base name, so the Today screen's entries link to their loot pool by the same `id`.
@@ -318,11 +318,27 @@ Flutter app (Android + iOS)
 
 ### Push notifications
 
-- FCM **topics**, so the server never stores user data:
+- Built in #7: `backend/alerts.py` builds and sends the alerts, and `rotation.new_alerts()` decides which are new.
+- FCM **topics**, so the server never stores user data. The app subscribes when the user watches something:
   - `weapon_<itemHash>`
-  - `raid_<activityHash>` (dungeons use this too)
-- **One message per weapon per reset,** naming every activity where it's the focus, e.g. "Spare Rations is today's bonus drop in Gambit." Variants like Customize and Matchmade share a focus, so group them first.
-- **iOS** needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
+  - `raid_<id>`, where `id` is the featured entry's name slug, e.g. `raid_vow-of-the-disciple`. Dungeons use it too. Slugs are used because one raid has several activity hashes (Standard, Master).
+- **Weapon alert (daily):** one per weapon per reset, naming every activity where it's the focus.
+  - **Title:** "Spare Rations is a bonus drop today"
+  - **Body:** "Bonus focus in Gambit". Bode wants the body so people learn which activity a weapon comes from.
+  - The category is added only when two categories share an activity name, e.g. "Quickplay (Solo Ops) and Quickplay (Vanguard Op)".
+  - **Image:** the weapon icon.
+- **Raid/dungeon alert (weekly):** **title only**, e.g. "Vow of the Disciple is featured this week". Bode: players already know the weekly rotation lasts until Tuesday.
+  - The always-available raid and dungeon (The Desert Perpetual, Equilibrium) are alerted every week too. Bode wants that; don't hide them from the watch list.
+- **Data payload** (strings only), for tap-to-open in #9:
+  - weapons: `kind=weapon`, `itemHash`, `activityIds` (comma-separated group ids)
+  - raids: `kind=raid|dungeon`, `id`
+- **Never twice:** `meta/state` stores `sentResetId` + `sentWeaponTopics` and `sentWeekId` + `sentRaidTopics`.
+  - **Week ID** is the date of the most recent Tuesday 17:00 UTC reset.
+  - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
+- **Images on iOS** need a Notification Service Extension in the app (#8). The backend already sets `mutable-content` and `fcm_options.image` on APNs. Android shows the image with no extra work.
+- **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
+- **Tests:** run `python -m unittest discover backend` from the repo root. Standard library only; covers the reset and week math, alert wording and deduplication. Test files are excluded from deploys in `firebase.json`.
+- **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
 - **Watch types are simplified** to "weapon, in any activity" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
 ### App (Flutter)
@@ -341,8 +357,8 @@ Flutter app (Android + iOS)
 | #3 | Update README and CLAUDE.md for iOS and the new architecture | S | Done |
 | #4 | Phase 0: Bungie API test script (Python) | M | Done |
 | #5 | Firebase project setup | S | Done |
-| #6 | Backend: daily rotation job (Cloud Function) | M | In review (deployed) |
-| #7 | Backend: push notifications for bonus drops and featured raids | S | Backlog |
+| #6 | Backend: daily rotation job (Cloud Function) | M | Done |
+| #7 | Backend: push notifications for bonus drops and featured raids | S | In progress |
 | #8 | Flutter app setup and Today screen | M | Backlog |
 | #9 | Watch screens: browse loot pools and raids, toggle alerts | M | Backlog |
 | #10 | Release: Android APK and iOS TestFlight | M | Backlog |
@@ -362,11 +378,9 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-- **#6** (branch `task_6_daily_rotation_job`): **deployed and verified on 2026-10-17.**
-  - A forced run wrote `rotation/current` (15 activities, 7 featured), `history/2026-10-17`, 74 `lootPools` and `meta/state`.
-  - First scheduled run: 2026-10-18 at 17:07 UTC.
-  - PR in review.
-- **Next:** #7, push notifications.
+- **#6:** deployed and verified on 2026-10-17. Merged.
+- **#7** (branch `task_7_push_notifications`): alerts written, unit tests pass, and the dry run plus local message encoding check out. Next: deploy, Force run, then check `meta/state` for the sent topics and the "Sent N of N new alerts" log line.
+- **Next after #7:** #8, the Flutter app setup and Today screen. That's the first time a real phone subscribes to a topic and receives a push.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
 ## Decision log
