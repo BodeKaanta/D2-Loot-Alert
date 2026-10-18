@@ -16,6 +16,14 @@ dependencies:
   firebase_messaging: ^17.0.0 # push notifications and topic subscriptions
   shared_preferences: ^2.5.6  # remembers the watch list on the phone
 
+# Pinned (#21): shared_preferences_android 2.5.0 (2026-10-17) crashes release
+# builds at startup. Its new JNI bridge calls a method that code shrinking (R8)
+# strips, so SharedPreferences.getInstance() throws NoSuchMethodError. 2.4.28 is
+# the last version before that change. Remove this once a fixed version is out
+# and a release build starts cleanly.
+dependency_overrides:
+  shared_preferences_android: 2.4.28
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

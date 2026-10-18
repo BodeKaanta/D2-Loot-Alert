@@ -369,6 +369,11 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
 
 - **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17, `shared_preferences` ^2.5 (added in #9 for the watch list).
   - `getToken()` is deprecated in `firebase_messaging` 17 (replaced by `register()`/`onRegistered`). We don't need tokens, only topics.
+  - **Pinned: `shared_preferences_android` 2.4.28** (`dependency_overrides` in `pubspec.yaml`, #21).
+    - 2.5.0 (released 2026-10-17) switched to a "Pigeon JNI" bridge that release-build code shrinking (R8) breaks. The app hung on the splash screen with `NoSuchMethodError ... SharedPreferencesApiRegistrar.getAll`, while debug builds worked.
+    - **Remove the pin** once a fixed version is out and a release build starts cleanly.
+  - **Always try a release build** (`flutter run --release`) before shipping. Some bugs, like this one, only show up there.
+  - To read the app's own crash log on the Pixel: `adb -s <device> logcat -d --pid=$(adb -s <device> shell pidof com.id0.d2lootalert)`.
 - **Code layout** (`app/lib/`):
 
   | File | What it does |
