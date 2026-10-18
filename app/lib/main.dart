@@ -23,13 +23,22 @@ Future<void> main() async {
 
   // Load the saved watch list before the first frame, so bells show the right state.
   final watches = WatchStore(await SharedPreferences.getInstance());
-  runApp(LootAlertApp(watches: watches));
+
+  // A bell tap updates instantly; if its background topic change fails later,
+  // show that here, on whatever screen is open.
+  final messenger = GlobalKey<ScaffoldMessengerState>();
+  watches.failures.listen((message) => messenger.currentState
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(message))));
+
+  runApp(LootAlertApp(watches: watches, messenger: messenger));
 }
 
 class LootAlertApp extends StatelessWidget {
-  const LootAlertApp({super.key, required this.watches});
+  const LootAlertApp({super.key, required this.watches, required this.messenger});
 
   final WatchStore watches;
+  final GlobalKey<ScaffoldMessengerState> messenger;
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +46,7 @@ class LootAlertApp extends StatelessWidget {
       title: 'D2 Loot Alert',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
+      scaffoldMessengerKey: messenger,
       // `builder` wraps the whole navigator, so pushed screens (a category, About)
       // can reach the watch list too, not just the home screen.
       builder: (context, child) => WatchScope(store: watches, child: child!),

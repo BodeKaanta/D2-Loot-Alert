@@ -1,17 +1,33 @@
+import 'dart:async';
+
 import 'package:d2lootalert/models.dart';
 import 'package:d2lootalert/watch_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Fake Firebase: records topic changes instead of talking to FCM.
+// Fake Firebase: records topic changes instead of talking to FCM. Setting
+// [gate] holds every topic change until the test completes it, like a slow network.
 class FakePush {
   bool permission = true;
   bool networkUp = true;
+  Completer<void>? gate;
   final topics = <String>{};
 
   Future<bool> requestPermission() async => permission;
-  Future<bool> subscribe(String topic) async => networkUp && topics.add(topic);
-  Future<bool> unsubscribe(String topic) async => networkUp && topics.remove(topic);
+
+  Future<bool> subscribe(String topic) async {
+    await gate?.future;
+    if (!networkUp) return false;
+    topics.add(topic);
+    return true;
+  }
+
+  Future<bool> unsubscribe(String topic) async {
+    await gate?.future;
+    if (!networkUp) return false;
+    topics.remove(topic);
+    return true;
+  }
 }
 
 void main() {
@@ -34,6 +50,7 @@ void main() {
     final store = newStore();
 
     expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.watching);
+    await store.settled;
     expect(push.topics, {'weapon_123'});
 
     final reopened = newStore(); // like reopening the app
@@ -41,11 +58,39 @@ void main() {
     expect(reopened.weapons.single.category, 'Gambit Ops');
   });
 
+  test('the bell updates before the network answers', () async {
+    push.gate = Completer<void>(); // a network that hasn't answered yet
+    final store = newStore();
+
+    expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.watching);
+    expect(store.isWatchingWeapon(123), isTrue); // already watching...
+    expect(push.topics, isEmpty); // ...while the subscribe is still in flight
+
+    push.gate!.complete();
+    await store.settled;
+    expect(push.topics, {'weapon_123'});
+  });
+
+  test('fast watch, unwatch, watch ends subscribed', () async {
+    push.gate = Completer<void>();
+    final store = newStore();
+
+    await store.toggleWeapon(spareRations, 'Gambit Ops');
+    await store.toggleWeapon(spareRations, 'Gambit Ops');
+    await store.toggleWeapon(spareRations, 'Gambit Ops');
+    push.gate!.complete();
+    await store.settled;
+
+    expect(store.isWatchingWeapon(123), isTrue);
+    expect(push.topics, {'weapon_123'}); // topic changes ran in tap order
+  });
+
   test('tapping again stops watching and unsubscribes', () async {
     final store = newStore();
     await store.toggleWeapon(spareRations, 'Gambit Ops');
 
     expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.stopped);
+    await store.settled;
     expect(push.topics, isEmpty);
     expect(newStore().isWatchingWeapon(123), isFalse);
   });
@@ -53,6 +98,7 @@ void main() {
   test('raids use the raid_ topic', () async {
     final store = newStore();
     await store.toggleRaid(lastWish);
+    await store.settled;
     expect(push.topics, {'raid_last-wish'});
     expect(store.isWatchingRaid('last-wish'), isTrue);
   });
@@ -64,10 +110,16 @@ void main() {
     expect(store.isWatchingWeapon(123), isFalse);
   });
 
-  test('a failed subscribe leaves the weapon unwatched', () async {
+  test('a failed subscribe is undone and reported', () async {
     push.networkUp = false;
     final store = newStore();
-    expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.failed);
-    expect(store.isWatchingWeapon(123), isFalse);
+    final failure = store.failures.first; // listen before tapping; events arrive asynchronously
+
+    expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.watching);
+    await store.settled;
+
+    expect(store.isWatchingWeapon(123), isFalse); // rolled back
+    expect(newStore().isWatchingWeapon(123), isFalse); // and not saved as watched
+    expect(await failure, contains('Spare Rations'));
   });
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
@@ -6,8 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 import 'push.dart' as push;
 
-/// What happened when the user tapped a bell.
-enum WatchResult { watching, stopped, noPermission, failed, busy }
+/// What a bell tap did. Network failures come later, through [WatchStore.failures].
+enum WatchResult { watching, stopped, noPermission }
 
 /// A watched weapon, with what the WATCHING list needs to show it.
 class WatchedWeapon {
@@ -36,6 +37,10 @@ class WatchedWeapon {
 /// `raid_<id>`). FCM can't tell an app which topics it's subscribed to, so the
 /// list is also saved on the phone with shared_preferences.
 ///
+/// Taps feel instant: the list (and every bell showing it) changes right away,
+/// and the topic change happens in the background (#20). If that fails, the
+/// change is undone and a message goes out on [failures].
+///
 /// It's a ChangeNotifier: widgets that read it through [WatchScope] rebuild
 /// whenever something is watched or unwatched.
 class WatchStore extends ChangeNotifier {
@@ -60,7 +65,21 @@ class WatchStore extends ChangeNotifier {
 
   final Map<int, WatchedWeapon> _weapons = {};
   final Map<String, Featured> _raids = {};
-  final Set<String> _pending = {}; // topics mid-change, so a double tap can't run twice
+
+  /// The last topic change queued for each topic. Changes to one topic run in
+  /// tap order, so watch-unwatch-watch ends subscribed, however fast the taps.
+  final Map<String, Future<void>> _topicQueue = {};
+
+  /// Asked once; afterwards a tap doesn't wait on the permission check at all.
+  bool _permissionGranted = false;
+
+  final _failures = StreamController<String>.broadcast();
+
+  /// Messages for background failures, e.g. no network. main.dart shows them.
+  Stream<String> get failures => _failures.stream;
+
+  /// Completes once every queued topic change has finished (used by tests).
+  Future<void> get settled => Future.wait(_topicQueue.values.toList());
 
   List<WatchedWeapon> get weapons =>
       _weapons.values.toList()..sort((a, b) => a.weapon.name.compareTo(b.weapon.name));
@@ -68,44 +87,64 @@ class WatchStore extends ChangeNotifier {
   bool isWatchingRaid(String id) => _raids.containsKey(id);
 
   Future<WatchResult> toggleWeapon(Weapon weapon, String category) {
-    final topic = push.weaponTopic(weapon.itemHash);
-    return isWatchingWeapon(weapon.itemHash)
-        ? _stop(topic, () => _weapons.remove(weapon.itemHash))
-        : _start(topic, () => _weapons[weapon.itemHash] = WatchedWeapon(weapon: weapon, category: category));
+    final hash = weapon.itemHash;
+    return _toggle(
+      topic: push.weaponTopic(hash),
+      label: weapon.name,
+      isWatching: () => isWatchingWeapon(hash),
+      add: () => _weapons[hash] = WatchedWeapon(weapon: weapon, category: category),
+      remove: () => _weapons.remove(hash),
+    );
   }
 
-  Future<WatchResult> toggleRaid(Featured raid) {
-    final topic = push.raidTopic(raid.id);
-    return isWatchingRaid(raid.id)
-        ? _stop(topic, () => _raids.remove(raid.id))
-        : _start(topic, () => _raids[raid.id] = raid);
-  }
+  Future<WatchResult> toggleRaid(Featured raid) => _toggle(
+        topic: push.raidTopic(raid.id),
+        label: raid.name,
+        isWatching: () => isWatchingRaid(raid.id),
+        add: () => _raids[raid.id] = raid,
+        remove: () => _raids.remove(raid.id),
+      );
 
-  Future<WatchResult> _start(String topic, void Function() add) async {
-    if (!_pending.add(topic)) return WatchResult.busy;
-    try {
-      if (!await _requestPermission()) return WatchResult.noPermission;
-      if (!await _subscribe(topic)) return WatchResult.failed;
-      add();
-      await _save();
-      notifyListeners();
-      return WatchResult.watching;
-    } finally {
-      _pending.remove(topic);
+  Future<WatchResult> _toggle({
+    required String topic,
+    required String label,
+    required bool Function() isWatching,
+    required void Function() add,
+    required void Function() remove,
+  }) async {
+    final watch = !isWatching();
+    if (watch && !_permissionGranted) {
+      // Only the first watch waits here (it may show Android's permission prompt).
+      _permissionGranted = await _requestPermission();
+      if (!_permissionGranted) return WatchResult.noPermission;
     }
+
+    // Change the list right away so every bell updates on this frame.
+    watch ? add() : remove();
+    notifyListeners();
+    unawaited(_save());
+
+    // Then tell FCM, in the background.
+    _queueTopicChange(topic, () async {
+      final ok = watch ? await _subscribe(topic) : await _unsubscribe(topic);
+      if (ok) return;
+      // Undo, unless a later tap already put it back the way it was.
+      if (isWatching() == watch) {
+        watch ? remove() : add();
+        notifyListeners();
+        await _save();
+      }
+      _failures.add('Couldn\'t update alerts for $label. Check your connection and try again.');
+    });
+    return watch ? WatchResult.watching : WatchResult.stopped;
   }
 
-  Future<WatchResult> _stop(String topic, void Function() remove) async {
-    if (!_pending.add(topic)) return WatchResult.busy;
-    try {
-      if (!await _unsubscribe(topic)) return WatchResult.failed;
-      remove();
-      await _save();
-      notifyListeners();
-      return WatchResult.stopped;
-    } finally {
-      _pending.remove(topic);
-    }
+  void _queueTopicChange(String topic, Future<void> Function() change) {
+    final next = (_topicQueue[topic] ?? Future<void>.value()).then((_) => change());
+    _topicQueue[topic] = next;
+    next.whenComplete(() {
+      if (identical(_topicQueue[topic], next)) _topicQueue.remove(topic);
+    });
   }
 
   void _load() {
@@ -132,6 +171,12 @@ class WatchStore extends ChangeNotifier {
           for (final r in _raids.values) {'id': r.id, 'name': r.name, 'kind': r.kind, 'image': r.image},
         ],
       }));
+
+  @override
+  void dispose() {
+    _failures.close();
+    super.dispose();
+  }
 }
 
 /// Makes the [WatchStore] available to every screen: `WatchScope.of(context)`.
