@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import alerts
 import rotation
+from game_data import GameData
 
 
 def utc(*args):
@@ -75,6 +76,33 @@ class Farmable(unittest.TestCase):
 
     def test_no_previews_is_not(self):
         self.assertFalse(rotation.is_farmable({}))
+
+
+class RaidCatalog(unittest.TestCase):
+    def test_farmable_raids_once_each_without_the_newest_or_pantheon(self):
+        def raid(name, original):
+            return {"displayProperties": {"name": name}, "originalDisplayProperties": {"name": original},
+                    "activityTypeHash": rotation.RAID, "pgcrImage": "/img/x.jpg"}
+        activities = {
+            "1": raid("Vow of the Disciple: Standard", "Vow of the Disciple"),
+            "2": raid("Vow of the Disciple: Master", "Vow of the Disciple"),
+            "3": raid("The Desert Perpetual: Standard", "The Desert Perpetual"),
+            "4": raid("Pantheon: Morgeth", "Pantheon: Morgeth"),
+        }
+        graph = {"9": {"displayProperties": {"name": "Pantheon"}, "selfAndAllDescendantHashes": [9],
+                       "relatedActivitySetHashes": [8]}}
+        data = GameData(activities, graph, {"8": {"activityHashes": [4]}})
+        raid_gear = 3808930384
+        profile = {"characterActivities": {"data": {"c1": {"availableActivities": [
+            {"activityHash": 1, **previews(raid_gear)},
+            {"activityHash": 2, **previews(raid_gear, rotation.WEEKLY_REWARD)},
+            {"activityHash": 3, **previews(rotation.WEEKLY_REWARD)},  # newest raid: never farmable
+            {"activityHash": 4, **previews(raid_gear)},  # Pantheon: another Portal category
+        ]}}}}
+
+        catalog = rotation.build_raid_catalog(data, profile)
+
+        self.assertEqual([(r["id"], r["kind"]) for r in catalog], [("vow-of-the-disciple", "raid")])
 
 
 class NewAlerts(unittest.TestCase):

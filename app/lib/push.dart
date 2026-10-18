@@ -1,12 +1,17 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 
-// Push notification helpers. Watching items (subscribing to topics like
-// weapon_<itemHash>) comes in #9; for now these support the first test push.
+// Push notification helpers. Watching something = subscribing this phone to its
+// topic; the backend sends each alert to a topic (backend/alerts.py).
 
 /// Topic for test messages sent by hand from the Firebase console.
 const testTopic = 'test';
 
+/// Must match weapon_topic() / raid_topic() in backend/alerts.py.
+String weaponTopic(int itemHash) => 'weapon_$itemHash';
+String raidTopic(String id) => 'raid_$id'; // dungeons too
+
 /// Asks for permission to show notifications (Android 13+ and iOS ask the user).
+/// Returns right away, without a prompt, once the user has answered.
 Future<bool> requestNotificationPermission() async {
   final settings = await FirebaseMessaging.instance.requestPermission();
   return settings.authorizationStatus == AuthorizationStatus.authorized ||
@@ -18,6 +23,15 @@ Future<bool> requestNotificationPermission() async {
 Future<bool> subscribe(String topic) async {
   try {
     await FirebaseMessaging.instance.subscribeToTopic(topic);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> unsubscribe(String topic) async {
+  try {
+    await FirebaseMessaging.instance.unsubscribeFromTopic(topic);
     return true;
   } catch (_) {
     return false;

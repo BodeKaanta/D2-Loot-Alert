@@ -33,6 +33,8 @@ abstract final class AppText {
   static const cardTitle = TextStyle(
       fontFamily: _font, fontSize: 14, fontWeight: FontWeight.w700, letterSpacing: 1.8,
       color: AppColors.textPrimary);
+  static const tabLabel = TextStyle(
+      fontFamily: _font, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.4, height: 1.3);
   static const label = TextStyle(
       fontFamily: _font, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 1.6,
       color: AppColors.textSecondary);
@@ -68,6 +70,12 @@ ThemeData buildTheme() {
       titleTextStyle: AppText.appTitle,
     ),
     dividerTheme: const DividerThemeData(color: AppColors.border, thickness: 1, space: 1),
+    snackBarTheme: const SnackBarThemeData(
+      backgroundColor: AppColors.surface,
+      contentTextStyle: AppText.body,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(side: BorderSide(color: AppColors.tileBorder)),
+    ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(color: AppColors.textPrimary),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(

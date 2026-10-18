@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../theme.dart';
+import '../watch_store.dart';
 import 'banner_image.dart';
+import 'watch_bell.dart';
 
 /// One activity's card: its banner and name, then its bonus focus weapons.
 /// The category isn't repeated here; the section header above shows it.
@@ -26,23 +28,27 @@ class ActivityCard extends StatelessWidget {
             height: 72,
             child: Text(activity.name.toUpperCase(), style: AppText.cardTitle),
           ),
-          for (final weapon in activity.weapons) WeaponRow(weapon: weapon),
+          for (final weapon in activity.weapons)
+            WeaponRow(weapon: weapon, trailing: WeaponBell(weapon: weapon, category: activity.category)),
         ],
       ),
     );
   }
 }
 
-/// Weapon icon tile plus its name and type.
+/// Weapon icon tile plus its name and a subtitle (its type by default),
+/// with an optional widget on the right, usually a [WeaponBell].
 class WeaponRow extends StatelessWidget {
-  const WeaponRow({super.key, required this.weapon});
+  const WeaponRow({super.key, required this.weapon, this.subtitle, this.trailing});
 
   final Weapon weapon;
+  final String? subtitle;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
       child: Row(
         children: [
           ItemTile(url: weapon.icon),
@@ -53,12 +59,31 @@ class WeaponRow extends StatelessWidget {
               children: [
                 Text(weapon.name, style: AppText.itemName),
                 const SizedBox(height: 2),
-                Text(weapon.type, style: AppText.itemType),
+                Text(subtitle ?? weapon.type, style: AppText.itemType),
               ],
             ),
           ),
+          ?trailing,
         ],
       ),
+    );
+  }
+}
+
+/// The watch bell for a weapon, wired to the shared watch list.
+class WeaponBell extends StatelessWidget {
+  const WeaponBell({super.key, required this.weapon, required this.category});
+
+  final Weapon weapon;
+  final String category;
+
+  @override
+  Widget build(BuildContext context) {
+    final watches = WatchScope.of(context);
+    return WatchBell(
+      watching: watches.isWatchingWeapon(weapon.itemHash),
+      label: weapon.name,
+      onToggle: () => watches.toggleWeapon(weapon, category),
     );
   }
 }

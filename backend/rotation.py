@@ -190,7 +190,37 @@ def build_snapshot(api, data, profile, now):
         "activities": sorted(activities.values(),
                              key=lambda a: (category_rank(a["category"]), a["category"], a["name"])),
         "featured": sorted(featured.values(), key=lambda f: (f["kind"], f["name"])),
+        "raidsAndDungeons": build_raid_catalog(data, profile),  # everything the app can watch
     }
+
+
+def build_raid_catalog(data, profile):
+    """Every raid and dungeon that can rotate into the featured list, for the app's watch toggles.
+
+    Grouped by base name like the featured list, so the IDs (and alert topics)
+    match. Left out:
+    - raid-typed extras the game files under other Portal categories (Pantheon)
+    - anything that only previews the once-a-week reward (the newest raid and
+      dungeon), since those are never farmable "featured" picks
+    """
+    catalog = {}
+    for character in profile["characterActivities"]["data"].values():
+        for activity in character.get("availableActivities", []):
+            activity_hash = activity["activityHash"]
+            definition = data.activity(activity_hash)
+            type_hash = definition.get("activityTypeHash")
+            if type_hash not in (RAID, DUNGEON) or not is_farmable(activity):
+                continue
+            if data.portal_category(activity_hash) not in (None, "Raids", "Dungeons"):
+                continue
+            name = base_name(definition)
+            catalog.setdefault(slug(name), {
+                "id": slug(name),
+                "name": name,
+                "kind": "raid" if type_hash == RAID else "dungeon",
+                "image": image_url(data.banner(activity_hash)),
+            })
+    return sorted(catalog.values(), key=lambda r: (r["kind"], r["name"]))
 
 
 def build_loot_pools(api, data, profile):
@@ -297,6 +327,7 @@ def dry_run():
         image = (a["image"] or "(no banner)").rsplit("/", 1)[-1]
         print(f"  {a['category']:13} {a['name']:24} {', '.join(w['name'] for w in a['weapons']):26} {image}")
     print("Featured: " + ", ".join(f"{f['name']} ({f['kind']})" for f in snapshot["featured"]))
+    print("Watchable raids/dungeons: " + ", ".join(r["name"] for r in snapshot["raidsAndDungeons"]))
 
     to_send, _, _ = new_alerts(snapshot, {}, now)  # empty state: as if nothing was sent yet
     print(f"Alerts that would be sent ({len(to_send)}):")
