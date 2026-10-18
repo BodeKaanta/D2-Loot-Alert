@@ -392,12 +392,19 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
 - **Raids & Dungeons:** FEATURED THIS WEEK (grid with bells), then ALL RAIDS and ALL DUNGEONS as slim banner rows with bells. These come from `rotation/current.raidsAndDungeons`; featured ones are labeled in gold.
 - **Watching** (`WatchStore`, a `ChangeNotifier` read through `WatchScope.of(context)`):
   - **Watching = subscribing to the FCM topic** (`weapon_<itemHash>`, `raid_<id>`). FCM can't list a phone's topics, so the list is also saved locally with `shared_preferences` (key `watches`, JSON).
-  - **The first watch asks for notification permission.** Nothing is saved if permission is denied or the subscribe fails. A double tap is ignored while one is in flight.
-  - **Firebase calls are injected,** so `test/watch_store_test.dart` runs with fakes.
+  - **Taps are instant (#20).** A tap changes the list, every bell, and the confirmation message on the same frame, and saves without waiting.
+    - The FCM subscribe or unsubscribe runs **in the background**, queued per topic, so fast repeated taps resolve in tap order.
+    - **If it fails,** the change is undone (unless a later tap already reversed it) and a message goes out on `WatchStore.failures`. `main.dart` shows those through a global `ScaffoldMessenger` key, on whatever screen is open.
+  - **The first watch asks for notification permission.** That's the only time a tap waits; once granted, it isn't asked again in that session. If it's denied, nothing is watched.
+  - **Firebase calls are injected,** so `test/watch_store_test.dart` runs with fakes, including a "slow network" gate to prove the bell updates before the network answers.
   - **A reinstall starts with an empty list** (a new install gets new FCM registrations anyway).
 - **Tapping a push** (`HomeScreen`): `getInitialMessage()` (app was closed) and `onMessageOpenedApp` (app was in the background) switch the tab by the alert's `kind`: `weapon` → Today, `raid`/`dungeon` → Raids & Dungeons.
   - With the app in the foreground, Android doesn't display FCM notification messages. That's fine, since the screens already update live.
-- **Tests:** `flutter test` (12 tests: models, category loot, reset math, watch store) and `flutter analyze`, both clean as of #9.
+- **Performance (#20):**
+  - **Judge smoothness in a release build** (`flutter run --release`). Debug builds scroll noticeably worse and aren't representative.
+  - **Banners decode at their on-screen size** (`cacheWidth` in `BannerImage`, from `LayoutBuilder`) instead of Bungie's ~1920 px originals. `BoxFit.cover` on the taller grid cells is accounted for.
+  - **No disk image cache.** Release scrolling was already smooth, so it wasn't worth a new package.
+- **Tests:** `flutter test` (14 tests: models, category loot, reset math, watch store) and `flutter analyze`, both clean as of #20.
 
 ### Design system (agreed with Bode in #8)
 

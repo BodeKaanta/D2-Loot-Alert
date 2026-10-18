@@ -4,7 +4,8 @@ import '../theme.dart';
 import '../watch_store.dart';
 
 /// Bell toggle: gold when watching, quiet gray when not. Shows a short message
-/// after each tap so the user knows what happened.
+/// right after each tap. The watch list updates instantly; a background network
+/// failure shows its own message later (see main.dart).
 class WatchBell extends StatelessWidget {
   const WatchBell({super.key, required this.watching, required this.label, required this.onToggle});
 
@@ -26,14 +27,10 @@ class WatchBell extends StatelessWidget {
           WatchResult.stopped => 'Stopped watching $label.',
           WatchResult.noPermission =>
             'Notifications are off for D2 Loot Alert. Turn them on in your phone\'s settings.',
-          WatchResult.failed => 'Couldn\'t update alerts for $label. Check your connection.',
-          WatchResult.busy => null, // a second tap while the first is still running
         };
-        if (message != null) {
-          ScaffoldMessenger.of(context)
-            ..hideCurrentSnackBar()
-            ..showSnackBar(SnackBar(content: Text(message)));
-        }
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(message)));
       },
     );
   }
