@@ -34,7 +34,7 @@ abstract final class AppText {
       fontFamily: _font, fontSize: 14, fontWeight: FontWeight.w700, letterSpacing: 1.8,
       color: AppColors.textPrimary);
   static const tabLabel = TextStyle(
-      fontFamily: _font, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.4);
+      fontFamily: _font, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.4, height: 1.3);
   static const label = TextStyle(
       fontFamily: _font, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 1.6,
       color: AppColors.textSecondary);

@@ -7,9 +7,10 @@ import '../theme.dart';
 class AppTabBar extends StatelessWidget {
   const AppTabBar({super.key, required this.index, required this.onSelect});
 
-  /// (label, share of the bar's width). "Raids & Dungeons" gets more room so
-  /// it fits on one line, matching the game's wording.
-  static const tabs = [('Today', 2), ('Loot', 2), ('Raids & Dungeons', 3)];
+  /// Three equal thirds, so the middle tab sits in the middle of the screen.
+  /// "Raids & Dungeons" is stacked on two lines so it never crowds the screen
+  /// edge or shrinks on narrower phones (e.g. most iPhones).
+  static const labels = ['Today', 'Loot', 'Raids &\nDungeons'];
 
   final int index;
   final ValueChanged<int> onSelect;
@@ -25,11 +26,8 @@ class AppTabBar extends StatelessWidget {
         top: false, // only keep clear of the phone's bottom gesture bar
         child: Row(
           children: [
-            for (final (i, (label, share)) in tabs.indexed)
-              Expanded(
-                flex: share,
-                child: _Tab(label: label, selected: i == index, onTap: () => onSelect(i)),
-              ),
+            for (final (i, label) in labels.indexed)
+              Expanded(child: _Tab(label: label, selected: i == index, onTap: () => onSelect(i))),
           ],
         ),
       ),
@@ -56,12 +54,19 @@ class _Tab extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                label.toUpperCase(),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                style: AppText.tabLabel.copyWith(
-                  color: selected ? AppColors.textPrimary : AppColors.textSecondary,
+              // Every tab gets the same two-line label area, with one-line labels
+              // centered in it, so all three underlines line up.
+              SizedBox(
+                height: 2 * AppText.tabLabel.fontSize! * AppText.tabLabel.height!,
+                child: Center(
+                  child: Text(
+                    label.toUpperCase(),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    style: AppText.tabLabel.copyWith(
+                      color: selected ? AppColors.textPrimary : AppColors.textSecondary,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 8),

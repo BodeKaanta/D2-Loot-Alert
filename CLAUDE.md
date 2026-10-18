@@ -382,7 +382,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   | `screens/` | `home_screen` (tabs and push taps), `today_screen`, `loot_screen`, `category_screen`, `raids_screen`, `about_screen` |
   | `widgets/` | Section header, banner image, activity card with `WeaponRow`/`WeaponBell`/`ItemTile`, featured grid and card with `RaidBell`, reset countdown, `WatchBell`, `AppTabBar`, `PageHeader` |
 
-- **Tabs** (bottom, `AppTabBar`, widths 2 : 2 : 3 so the last label fits): **TODAY / LOOT / RAIDS & DUNGEONS**. The last name matches the game's wording (Bode). `IndexedStack` keeps each tab's scroll position.
+- **Tabs** (bottom, `AppTabBar`, **three equal thirds** so LOOT sits in the middle, as Bode asked): **TODAY / LOOT / RAIDS & DUNGEONS**. "RAIDS &" / "DUNGEONS" is stacked on two lines (Bode: it crowded the screen edge; stacking also keeps one text size on narrower iPhones). Every tab has the same two-line label area, so the underlines line up. The last name matches the game's wording (Bode). `IndexedStack` keeps each tab's scroll position.
 - **Today:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
   - **Layout, like the game's Portal:** "BONUS FOCUS" with one section per Portal category (SOLO OPS, FIRETEAM OPS… GAMBIT OPS) via `groupByCategory()`, cards showing only the activity name. Every weapon row has a watch bell.
   - Then "FEATURED THIS WEEK" with RAIDS and DUNGEONS, **kept at the bottom** (Bode, 2026-10-17): daily content changes more often, and the RAIDS & DUNGEONS tab shows the featured ones first anyway.
