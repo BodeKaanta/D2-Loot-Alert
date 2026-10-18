@@ -323,7 +323,7 @@ Flutter app (Android + iOS)
 
   | Path | Holds |
   |---|---|
-  | `rotation/current` | `resetId`, `updatedAt`, `activities[]`, `featured[]` |
+  | `rotation/current` | `resetId`, `updatedAt`, `activities[]`, `featured[]`, `raidsAndDungeons[]` (every farmable-capable raid and dungeon, same entry shape and IDs as `featured`; Pantheon and the newest raid and dungeon are left out) |
   | `history/{resetId}` | a copy of each reset's last snapshot |
   | `lootPools/{id}` | one activity group's weapons, from its definitions' `rewards`. Rebuilt only when the manifest version or `POOLS_SCHEMA` (in `rotation.py`) changes; a rebuild also deletes pools whose IDs no longer exist. |
   | `meta/state` | `manifestVersion`, `poolsSchema`, `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`) |
@@ -359,7 +359,7 @@ Flutter app (Android + iOS)
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
 - **Images on iOS** need a Notification Service Extension in the app (#8). The backend already sets `mutable-content` and `fcm_options.image` on APNs. Android shows the image with no extra work.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
-- **Tests:** run `python -m unittest discover backend` from the repo root (18 tests, standard library only). They cover the reset and week math, alert wording, deduplication, the farmable check, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
+- **Tests:** run `python -m unittest discover backend` from the repo root (19 tests, standard library only). They cover the reset and week math, alert wording, deduplication, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
 - **Watch types are simplified** to "weapon, in any activity" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
@@ -367,26 +367,37 @@ Flutter app (Android + iOS)
 
 Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, and the app ID is `com.id0.d2lootalert` on both platforms. The display name is "D2 Loot Alert".
 
-- **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17.
-  - #9 will likely add a small local store for the watch list, e.g. `shared_preferences`. Ask first.
+- **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17, `shared_preferences` ^2.5 (added in #9 for the watch list).
   - `getToken()` is deprecated in `firebase_messaging` 17 (replaced by `register()`/`onRegistered`). We don't need tokens, only topics.
 - **Code layout** (`app/lib/`):
 
   | File | What it does |
   |---|---|
-  | `main.dart` | Firebase init; registers the Inter license |
+  | `main.dart` | Firebase init, Inter license, loads the `WatchStore` before the first frame. `MaterialApp.builder` wraps the navigator in `WatchScope`, so pushed screens can reach it too. |
   | `theme.dart` | `AppColors`, `AppText`, `buildTheme()` |
-  | `models.dart` | Defensive parsing of the Firestore docs |
+  | `models.dart` | Defensive parsing of the Firestore docs; `groupByCategory()`; `buildCategoryLoot()`; `portalCategories` |
   | `reset.dart` | Next daily reset and countdown text |
-  | `push.dart` | Permission and topic subscribe |
-  | `screens/` | Today, About |
-  | `widgets/` | Section header, banner image, activity card with weapon rows, featured grid and card, reset countdown |
+  | `push.dart` | Permission, topic subscribe and unsubscribe, `weaponTopic()` / `raidTopic()` (must match `backend/alerts.py`) |
+  | `watch_store.dart` | The watch list (see Watching below), plus `WatchScope` |
+  | `screens/` | `home_screen` (tabs and push taps), `today_screen`, `loot_screen`, `category_screen`, `raids_screen`, `about_screen` |
+  | `widgets/` | Section header, banner image, activity card with `WeaponRow`/`WeaponBell`/`ItemTile`, featured grid and card with `RaidBell`, reset countdown, `WatchBell`, `AppTabBar`, `PageHeader` |
 
-- **Today screen:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
-  - **Layout, like the game's Portal:** "BONUS FOCUS" with one section per Portal category (SOLO OPS, FIRETEAM OPS… GAMBIT OPS) via `groupByCategory()`, cards showing only the activity name.
-  - Then "FEATURED THIS WEEK" with RAIDS and DUNGEONS sections.
-- **Screens still to come (#9):** Browse (activity → loot pool → watch toggle) and Raids & Dungeons (watch toggles), probably behind a bottom tab bar.
-- **Tests:** `flutter test` and `flutter analyze` (both clean as of #8). They cover model parsing and reset math.
+- **Tabs** (bottom, `AppTabBar`, widths 2 : 2 : 3 so the last label fits): **TODAY / LOOT / RAIDS & DUNGEONS**. The last name matches the game's wording (Bode). `IndexedStack` keeps each tab's scroll position.
+- **Today:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
+  - **Layout, like the game's Portal:** "BONUS FOCUS" with one section per Portal category (SOLO OPS, FIRETEAM OPS… GAMBIT OPS) via `groupByCategory()`, cards showing only the activity name. Every weapon row has a watch bell.
+  - Then "FEATURED THIS WEEK" with RAIDS and DUNGEONS, **kept at the bottom** (Bode, 2026-10-17): daily content changes more often, and the RAIDS & DUNGEONS tab shows the featured ones first anyway.
+- **Loot:** WATCHING (every watched weapon, with its bell), then one banner card per Portal category with its weapon count. A card opens `CategoryScreen`: the category's whole pool, each weapon with a bell.
+  - `buildCategoryLoot()` merges the `lootPools` docs per category. The main pool is the weapon list most activities share. Weapons outside it are labeled "<activity> only" (e.g. Trials of Osiris, Sparrow Racing League, Warden of Nothing), which also covers Iron Banner or Trials-specific focus later.
+  - **Only the Portal categories are shown** (`portalCategories`, kept in sync with `CATEGORY_ORDER` in `rotation.py`). That hides the one-off Campaign, Story and World quest weapons (Bode).
+- **Raids & Dungeons:** FEATURED THIS WEEK (grid with bells), then ALL RAIDS and ALL DUNGEONS as slim banner rows with bells. These come from `rotation/current.raidsAndDungeons`; featured ones are labeled in gold.
+- **Watching** (`WatchStore`, a `ChangeNotifier` read through `WatchScope.of(context)`):
+  - **Watching = subscribing to the FCM topic** (`weapon_<itemHash>`, `raid_<id>`). FCM can't list a phone's topics, so the list is also saved locally with `shared_preferences` (key `watches`, JSON).
+  - **The first watch asks for notification permission.** Nothing is saved if permission is denied or the subscribe fails. A double tap is ignored while one is in flight.
+  - **Firebase calls are injected,** so `test/watch_store_test.dart` runs with fakes.
+  - **A reinstall starts with an empty list** (a new install gets new FCM registrations anyway).
+- **Tapping a push** (`HomeScreen`): `getInitialMessage()` (app was closed) and `onMessageOpenedApp` (app was in the background) switch the tab by the alert's `kind`: `weapon` → Today, `raid`/`dungeon` → Raids & Dungeons.
+  - With the app in the foreground, Android doesn't display FCM notification messages. That's fine, since the screens already update live.
+- **Tests:** `flutter test` (12 tests: models, category loot, reset math, watch store) and `flutter analyze`, both clean as of #9.
 
 ### Design system (agreed with Bode in #8)
 
@@ -395,7 +406,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - background `#0B0E11`, cards `#151A1F`
   - 1 px borders at 15% white (item tiles at 30%)
   - text `#E9E7E2`, secondary text `#8B939C`
-  - exotic gold `#CEAE33`: **the one bright accent**, used for the 4×20 bar in front of each section header. Keep it rare so it stays a landmark.
+  - exotic gold `#CEAE33`: **the one bright accent.** It's used for the 4×20 bar in front of each section header, a *watched* bell, the active tab's underline, and the "FEATURED THIS WEEK" label on raid rows. Keep it rare so it stays a landmark.
 - **Type:** **Inter** (SIL OFL 1.1, bundled in `app/assets/fonts/` with `Inter-OFL.txt`, which must stay).
   - Headers are uppercase with wide letter spacing (`AppText.appTitle`, `groupTitle`, `sectionHeader`, `cardTitle`, `label`). Widgets call `.toUpperCase()` themselves.
   - **Hierarchy,** largest first:
@@ -459,7 +470,7 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #7 | Backend: push notifications for bonus drops and featured raids | S | Done |
 | #8 | Flutter app setup and Today screen (Android/PC) | M | In progress |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
-| #9 | Watch screens: browse loot pools and raids, toggle alerts | M | Backlog |
+| #9 | Watch screens: browse loot pools and raids, toggle alerts | M | In progress |
 | #10 | Release: Android APK and iOS TestFlight | M | Backlog |
 | later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login), after #7 | S | Backlog |
@@ -477,11 +488,11 @@ Watch these in the daily snapshots once #6 runs.
 ## Current status
 
 - **Backend (#6, #7):** deployed and merged. It runs daily at 17:07 UTC plus backups, and sends alerts. A forced run on 2026-10-17 sent all 20 alerts and FCM accepted them.
-- **#8** (branch `task_8_flutter_app_today_screen`): Flutter app created and registered with Firebase. Theme, Today screen and About screen built.
-  - Verified on the emulator: live data, featured grid, About screen, notification permission and `test` topic subscription.
-  - Real push test on Bode's Pixel passed. Draft PR #18 is open.
-  - **Remaining:** the in-game Portal categories and real banners (backend + app) are written and tested locally. They need Bode's review, then a commit, a backend redeploy, a Force run (which also rebuilds the loot pools via `POOLS_SCHEMA`) and an emulator check, then mark the PR ready.
-- **Next:** #9 (watch screens), then #17 on the Mac.
+- **#8:** merged (PR #18). App with Portal categories, real banners, farmable-only featured list; a real push was received on Bode's Pixel.
+- **#9** (branch `task_9_watch_screens`): tabs, LOOT, category pools, RAIDS & DUNGEONS, watch bells, watch list, push-tap handling, and the backend `raidsAndDungeons` list.
+  - Verified on the emulator: watching Gnawing Hunger asked for permission, subscribed, showed the gold bell and listed it under WATCHING.
+  - **Remaining:** Bode's review, commit, a backend redeploy plus Force run (so the ALL RAIDS / ALL DUNGEONS lists fill), then the PR. A real weapon alert arrives at the next reset where a watched weapon is a bonus focus.
+- **Next:** #13 (Xûr), #17 (iOS on the Mac), #10 (release).
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
 ## Decision log
@@ -519,6 +530,11 @@ Watch these in the daily snapshots once #6 runs.
 - **2026-10-17:** **Bungie images appear only as content** (icons, banners), never UI graphics or emblems. The app's style stays "inspired by", not copied.
 - **2026-10-17:** **"Featured" means farmable (the weekly rotator).** The newest raid and dungeon are excluded via the "Weekly Reward"-only preview check, and get no weekly pushes. This supersedes the earlier "alert the always-available ones every Tuesday".
 - **2026-10-17:** Featured cards show only the name; the RAIDS / DUNGEONS header already says the kind.
+- **2026-10-17:** **Featured raids stay at the bottom of Today;** the RAIDS & DUNGEONS tab shows them first.
+- **2026-10-17:** **Tabs: TODAY / LOOT / RAIDS & DUNGEONS** (the last matches the game's wording).
+- **2026-10-17:** **LOOT browses by Portal category, not by activity.** Special-pool weapons are labeled "<activity> only". Campaign, Story and World quest weapons are hidden.
+- **2026-10-17:** **The watch list is stored locally** with `shared_preferences` (FCM can't list a phone's topics). Watching = a topic subscription; the first watch asks for notification permission.
+- **2026-10-17:** **Every weapon row on Today gets a watch bell too,** so a weapon can be watched right where it's spotted.
 - **2026-10-17:** #8 split by platform. The iOS-only work (push key, image extension, iPad testing) is #17, done on the Mac.
 - **2026-10-17:** The push test uses a `test` topic, the same path as real alerts. `getToken()` is deprecated in firebase_messaging 17, and we don't need device tokens.
 - **2026-10-17:** App ID `com.id0.d2lootalert`. The Firebase project lives in Bode's personal Google account.
