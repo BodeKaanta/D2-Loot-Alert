@@ -480,12 +480,15 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #5 | Firebase project setup | S | Done |
 | #6 | Backend: daily rotation job (Cloud Function) | M | Done |
 | #7 | Backend: push notifications for bonus drops and featured raids | S | Done |
-| #8 | Flutter app setup and Today screen (Android/PC) | M | In progress |
+| #8 | Flutter app setup and Today screen (Android/PC) | M | Done |
+| #9 | Watch screens: browse loot pools and raids, toggle alerts | M | Done |
+| #21 | Bug: release build hung on splash (pin `shared_preferences_android` 2.4.28) | S | Done |
+| #20 | Performance: instant bell taps, banners decoded at display size | S | Done |
+| #24 | Update CLAUDE.md status for a new session | S | In progress |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
-| #9 | Watch screens: browse loot pools and raids, toggle alerts | M | In progress |
-| #10 | Release: Android APK and iOS TestFlight | M | Backlog |
+| #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
+| #13 | Xûr alerts: exotic armor he's selling (names only, no login) | S | Backlog |
 | later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
-| #13 | Xûr alerts: exotic armor he's selling (names only, no login), after #7 | S | Backlog |
 | later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
 
@@ -499,12 +502,24 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-- **Backend (#6, #7):** deployed and merged. It runs daily at 17:07 UTC plus backups, and sends alerts. A forced run on 2026-10-17 sent all 20 alerts and FCM accepted them.
-- **#8:** merged (PR #18). App with Portal categories, real banners, farmable-only featured list; a real push was received on Bode's Pixel.
-- **#9** (branch `task_9_watch_screens`): tabs, LOOT, category pools, RAIDS & DUNGEONS, watch bells, watch list, push-tap handling, and the backend `raidsAndDungeons` list.
-  - Verified on the emulator: watching Gnawing Hunger asked for permission, subscribed, showed the gold bell and listed it under WATCHING.
-  - **Remaining:** Bode's review, commit, a backend redeploy plus Force run (so the ALL RAIDS / ALL DUNGEONS lists fill), then the PR. A real weapon alert arrives at the next reset where a watched weapon is a bonus focus.
-- **Next:** #13 (Xûr), #17 (iOS on the Mac), #10 (release).
+As of 2026-10-18, everything through #21 is merged into `main`, and `main` matches what's deployed.
+
+- **Backend:** the Cloud Function `daily_rotation` is deployed from `main`'s `backend/`. It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts.
+- **Android app:** works end to end on Bode's Pixel.
+  - Today, Loot and Raids & Dungeons tabs, watch bells with instant taps, and the watch list.
+  - Use **`flutter run --release`** to judge how it feels; debug builds are slower.
+- **Verified:** a manual test push via topic `test` reached the Pixel. Watching a weapon subscribes to its topic (checked on the emulator).
+- **Not verified yet** (first chance: the next 17:07 UTC run where something Bode watches comes up):
+  1. a real backend alert for a *watched* weapon or raid arriving on the Pixel
+  2. tapping that push opening the right tab (weapon → Today, raid → Raids & Dungeons)
+  - Ask Bode how it went. If either fails, open a bug task.
+- **Next tasks, in suggested order:**
+  1. **#17** iOS on Bode's Mac. It blocks the friend, the iOS tester. Start with CLAUDE.md > "App setup on a new machine".
+  2. **#10** release. It needs #17 and the friend's app icon (brief: "D2 Loot Alert – App Icon Brief", a Claude Doc Bode exported as PDF).
+  3. **#13** Xûr. Small, can slot in anywhere.
+- **Keep an eye on:**
+  - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
+  - "Still open (minor)" above.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
 ## Decision log
