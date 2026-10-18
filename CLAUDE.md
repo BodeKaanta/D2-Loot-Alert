@@ -189,7 +189,12 @@ Verified on 2026-10-17 against d2portal.com and Kyber's Corner. Raw data is in `
   - It's static game data, so the Browse screen can show complete pools from day one.
   - Example: Gambit's pool includes Spare Rations, Gnawing Hunger, Bug-Out Bag and Last Man Standing.
   - Control and Competitive share the same Crucible pool.
-- **Activity category:** look up `activityTypeHash` in `DestinyActivityTypeDefinition`.
+- **In-game Portal category** (used since #8): the category the game itself shows, e.g. "Solo Ops", "Gambit Ops", "Raids". It comes from **`DestinyFireteamFinderActivityGraphDefinition`**, the tree the game builds its Portal screens from.
+  - The **top-level nodes** (no `parentHash`, non-empty name) are the categories: Solo Ops, Fireteam Ops, Arena Ops, Pinnacle Ops, Crucible Ops, Gambit Ops, Raids, Dungeons, Campaign, Pantheon, World.
+  - Each node lists `selfAndAllDescendantHashes`. Each descendant's `relatedActivitySetHashes` points into **`DestinyFireteamFinderActivitySetDefinition`**, whose `activityHashes` are the activities.
+  - `DestinyGlobalConstantsDefinition.portalActivityGraphRootNodesWithIcons` lists the five main Portal roots in the game's order: Solo, Fireteam, Arena, Pinnacle ("Prestige" in its image name), Crucible. "Gambit Ops" isn't in that list, but it is a top-level node.
+  - On 2026-10-17: The Coil and Midtown → Pinnacle Ops; Battleground: Oracle, HyperNet Current, The Devils' Lair, Warden of Nothing → Fireteam Ops; Astral Alignment and the "Vanguard Op" Quickplay → Arena Ops; Trials and Sparrow Racing → Crucible Ops; Gambit → Gambit Ops.
+- **Bungie's internal activity type** is `activityTypeHash` in `DestinyActivityTypeDefinition`. The game doesn't show it ("Crawl", "Mission"…). Use it only as a fallback for activities outside the Portal tree, and to detect raids and dungeons.
 
   | Type | Hash |
   |---|---|
@@ -200,7 +205,7 @@ Verified on 2026-10-17 against d2portal.com and Kyber's Corner. Raw data is in `
   | Solo Ops | `3851289711` |
   | Vanguard Op | `1996806804` and `2009300208` |
 
-  - The two "Vanguard Op" types are Fireteam Ops and Pinnacle Ops; which is which isn't settled yet.
+  - The two "Vanguard Op" types turned out to be Arena Ops and Pinnacle Ops in the game; the Portal tree above settles it.
   - `directActivityModeType` is missing on newer activities such as Vesper's Host and The Desert Perpetual, so don't rely on it.
 - **Featured raids and dungeons:** activities whose type is Raid or Dungeon **and** whose `challenges` list isn't empty.
   - This matched Kyber's Corner exactly: Vow of the Disciple, Last Wish, Prophecy and Vesper's Host.
@@ -212,9 +217,17 @@ Verified on 2026-10-17 against d2portal.com and Kyber's Corner. Raw data is in `
 Other notes:
 
 - The docs warn that 204 data "can be unfortunately problematic and relatively unreliable." Parse defensively: treat every field as optional, and never crash on missing fields.
-- **Name lookups:** the full manifest is large, so look up individual hashes with the single-definition endpoint.
-  - The first Phase 0 run made about 300 lookups and took about 85 seconds; the cache makes reruns fast.
-  - The backend should cache definitions too, in Firestore or a downloaded activity table. Decide in #6.
+- **Banners (`pgcrImage`):** many activities use Bungie's literal placeholder, `/img/theme/destiny/bgs/pgcrs/placeholder.jpg`. On 2026-10-17 that was 707 of 4,069 activity definitions, including Gambit, The Coil and Quickplay. Real art usually sits on *another version* of the same activity, so the backend falls back (`game_data.py`):
+  1. its own image, if it isn't the placeholder
+  2. the most common real image among definitions with the same name, stripping known variant words after a colon one at a time ("Quickplay: Master" → "Quickplay")
+  3. for a playlist, its first map's image (Gambit → `gambit_badlands.jpg`)
+  4. none (the app shows a plain dark banner)
+
+  Bungie's image folders can't be listed; only images referenced by definitions are usable (502 distinct banners). The in-game Gambit card art isn't in the public data.
+- **Definition lookups:**
+  - **Activity tables are downloaded whole** from the manifest's `jsonWorldComponentContentPaths.en`. `DestinyActivityDefinition` is about 11 MB and downloads in under a second; the two Fireteam Finder tables are small.
+  - **Items stay single lookups** through the entity endpoint, because the item table is far bigger.
+  - A full run with a loot-pool rebuild takes about 80 seconds, down from about 160.
 - **Item icons** are relative paths. Prefix them with `https://www.bungie.net`.
 - **Rate limits:** a few requests per day are far below any limit.
 
@@ -239,7 +252,7 @@ Flutter app (Android + iOS)
 | Folder | Contents |
 |---|---|
 | `phase0/` | Bungie API test script (#4) |
-| `backend/` | Cloud Functions source, Python (#6, #7). `main.py` is the scheduled function, `rotation.py` the logic, `bungie.py` the API client (from Phase 0). |
+| `backend/` | Cloud Functions source, Python (#6, #7, #8). `main.py` is the scheduled function, `rotation.py` the logic, `alerts.py` the pushes, `game_data.py` the Portal categories and banner fallbacks from whole tables, `bungie.py` the API client (from Phase 0). |
 | `firebase.json`, `.firebaserc` | Firebase CLI config: functions source and runtime, rules file, default project `d2-loot-alert` |
 | `firestore.rules` | Firestore security rules, deployed with `firebase deploy --only firestore:rules` |
 | `app/` | Flutter app (#8 onward) |
@@ -305,11 +318,13 @@ Flutter app (Android + iOS)
   |---|---|
   | `rotation/current` | `resetId`, `updatedAt`, `activities[]`, `featured[]` |
   | `history/{resetId}` | a copy of each reset's last snapshot |
-  | `lootPools/{id}` | one activity group's weapons, from its definitions' `rewards`. Rebuilt only when the manifest version changes. |
-  | `meta/state` | `manifestVersion`, `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`) |
+  | `lootPools/{id}` | one activity group's weapons, from its definitions' `rewards`. Rebuilt only when the manifest version or `POOLS_SCHEMA` (in `rotation.py`) changes; a rebuild also deletes pools whose IDs no longer exist. |
+  | `meta/state` | `manifestVersion`, `poolsSchema`, `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`) |
 
-  - An **activity group** has an `id` (e.g. `gambit-gambit`), `name`, `category`, `image`, `activityHashes[]` and `weapons[]`.
+  - An **activity group** has an `id` (e.g. `gambit-ops-gambit`), `name`, `category` (the in-game Portal category), `image` (a real banner when one exists), `activityHashes[]` and `weapons[]`.
     - The `id` is the slug of category + base name, so the Today screen's entries link to their loot pool by the same `id`.
+    - `activities[]` is sorted in the game's Portal order (`CATEGORY_ORDER`: Solo, Fireteam, Arena, Pinnacle, Crucible, Gambit Ops), then anything else alphabetically, then by name. The app keeps that order.
+    - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool shape change. 2 = Portal categories (#8).
   - A **weapon** has `itemHash`, `name`, `type` and `icon` (a full URL).
   - A **featured** entry has `id`, `name`, `kind` (`raid` or `dungeon`), `image` and `activityHashes[]`.
   - The always-available newest raid (The Desert Perpetual, including its Epic version) and dungeon (Equilibrium) also show up as featured.
@@ -337,7 +352,7 @@ Flutter app (Android + iOS)
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
 - **Images on iOS** need a Notification Service Extension in the app (#8). The backend already sets `mutable-content` and `fcm_options.image` on APNs. Android shows the image with no extra work.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
-- **Tests:** run `python -m unittest discover backend` from the repo root. Standard library only; covers the reset and week math, alert wording and deduplication. Test files are excluded from deploys in `firebase.json`.
+- **Tests:** run `python -m unittest discover backend` from the repo root (14 tests, standard library only). They cover the reset and week math, alert wording, deduplication, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
 - **Watch types are simplified** to "weapon, in any activity" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
@@ -361,6 +376,8 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   | `widgets/` | Section header, banner image, activity card with weapon rows, featured grid and card, reset countdown |
 
 - **Today screen:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
+  - **Layout, like the game's Portal:** "BONUS FOCUS" with one section per Portal category (SOLO OPS, FIRETEAM OPS… GAMBIT OPS) via `groupByCategory()`, cards showing only the activity name.
+  - Then "FEATURED THIS WEEK" with RAIDS and DUNGEONS sections.
 - **Screens still to come (#9):** Browse (activity → loot pool → watch toggle) and Raids & Dungeons (watch toggles), probably behind a bottom tab bar.
 - **Tests:** `flutter test` and `flutter analyze` (both clean as of #8). They cover model parsing and reset math.
 
@@ -371,19 +388,29 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - background `#0B0E11`, cards `#151A1F`
   - 1 px borders at 15% white (item tiles at 30%)
   - text `#E9E7E2`, secondary text `#8B939C`
-  - exotic gold `#CEAE33`
+  - exotic gold `#CEAE33`: **the one bright accent**, used for the 4×20 bar in front of each section header. Keep it rare so it stays a landmark.
 - **Type:** **Inter** (SIL OFL 1.1, bundled in `app/assets/fonts/` with `Inter-OFL.txt`, which must stay).
-  - Headers are uppercase with wide letter spacing (`AppText.appTitle`, `sectionHeader`, `cardTitle`, `label`). Widgets call `.toUpperCase()` themselves.
+  - Headers are uppercase with wide letter spacing (`AppText.appTitle`, `groupTitle`, `sectionHeader`, `cardTitle`, `label`). Widgets call `.toUpperCase()` themselves.
+  - **Hierarchy,** largest first:
+    1. `groupTitle` 20 ("BONUS FOCUS", "FEATURED THIS WEEK")
+    2. `appTitle` 18
+    3. `sectionHeader` 16, bold off-white with the gold bar (categories, RAIDS, DUNGEONS)
+    4. `cardTitle` 14 (activity names on banners)
+
+    Section headers must stay bigger than card titles: Bode scans by them while scrolling fast (2026-10-17).
   - Destiny's own font, reportedly Neue Haas Grotesk, is commercial, so we don't use it.
 - **Shapes:** square corners everywhere, no ripple (`NoSplash`), thin 1 px borders. Weapon icons sit in square tiles like Destiny's inventory.
 - **Art rules:**
   - **No AI-generated art, ever.**
   - **Images only from the Bungie API:** weapon icons and activity `pgcrImage` banners, shown dimmed under a gradient. **No bungie.net concept art** for now; it's Bungie-owned, and Apple flags third-party IP.
+  - **Bungie images only as *content*:** an item's icon, an activity's banner. **Never Bungie UI graphics or branding**, e.g. the Portal category emblems in `portalActivityGraphRootNodesWithIcons` or the Gambit snake shield. Category names are fine as plain text.
+  - **The line** (agreed with Bode on 2026-10-17): looking *inspired by* Destiny is fine, since style, colors and layout aren't protected. Copying their graphics, logos, font or screens, implying it's official, or making money is not.
   - **Credits** live on the About screen: "Destiny imagery © Bungie, Inc." plus the not-affiliated disclaimer and the Inter credit.
   - **The app icon** will be made by Bode's artist friend (the iOS tester). No Bungie or Destiny logos. Specs: 1024×1024 PNG with no transparency, plus optional Android foreground and background layers. Credit him on the About screen if he wants; Bode will ask.
 - **Known data quirks:**
-  - Some activities share Bungie's generic banner image (e.g. The Coil, Gambit and Quickplay: Master all show the same one).
-  - Bungie's category names can look odd, e.g. "Crawl", "Mission", "Vanguard Op".
+  - Bungie's placeholder banner is replaced by real art where any exists (see Bungie API notes > Banners).
+  - The Arena Ops and Solo Ops Quickplays share the same "Quickplay" banner, since the fallback works by name.
+  - Midtown's banner comes from its Crucible map art.
 
 ### App setup on a new machine (including Bode's Mac)
 
@@ -437,7 +464,6 @@ All Phase 0 questions are answered; see [Phase 0 findings](#phase-0-findings).
 **Still open (minor):**
 
 - Does Gambit's focus sometimes repeat across resets?
-- Which "Vanguard Op" type is Fireteam Ops and which is Pinnacle Ops?
 
 Watch these in the daily snapshots once #6 runs.
 
@@ -446,7 +472,8 @@ Watch these in the daily snapshots once #6 runs.
 - **Backend (#6, #7):** deployed and merged. It runs daily at 17:07 UTC plus backups, and sends alerts. A forced run on 2026-10-17 sent all 20 alerts and FCM accepted them.
 - **#8** (branch `task_8_flutter_app_today_screen`): Flutter app created and registered with Firebase. Theme, Today screen and About screen built.
   - Verified on the emulator: live data, featured grid, About screen, notification permission and `test` topic subscription.
-  - **Remaining:** Bode's real push test on the Pixel, then the PR.
+  - Real push test on Bode's Pixel passed. Draft PR #18 is open.
+  - **Remaining:** the in-game Portal categories and real banners (backend + app) are written and tested locally. They need Bode's review, then a commit, a backend redeploy, a Force run (which also rebuilds the loot pools via `POOLS_SCHEMA`) and an emulator check, then mark the PR ready.
 - **Next:** #9 (watch screens), then #17 on the Mac.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
@@ -480,6 +507,9 @@ Watch these in the daily snapshots once #6 runs.
 - **2026-10-17:** **App art policy:** only Bungie API images, credited to Bungie on an About screen. No bungie.net concept art for now, no AI-generated art ever. The app icon comes from Bode's artist friend.
 - **2026-10-17:** **Font: Inter** (free, OFL) instead of Destiny's commercial font. The look follows Bungie's dark in-game style; the Today screen layout was approved from a mockup.
 - **2026-10-17:** **Firebase client config files are gitignored;** each machine runs `flutterfire configure`.
+- **2026-10-17:** **In-game Portal categories** (from the Fireteam Finder tree) replace Bungie's internal activity types. The Today screen groups cards under category headers like the game. This was done inside #8, since it's part of getting the Today screen right.
+- **2026-10-17:** **Real banners replace Bungie's placeholder** via the name and playlist fallbacks. The backend downloads whole activity tables instead of making single lookups.
+- **2026-10-17:** **Bungie images appear only as content** (icons, banners), never UI graphics or emblems. The app's style stays "inspired by", not copied.
 - **2026-10-17:** #8 split by platform. The iOS-only work (push key, image extension, iPad testing) is #17, done on the Mac.
 - **2026-10-17:** The push test uses a `test` topic, the same path as real alerts. `getToken()` is deprecated in firebase_messaging 17, and we don't need device tokens.
 - **2026-10-17:** App ID `com.id0.d2lootalert`. The Firebase project lives in Bode's personal Google account.

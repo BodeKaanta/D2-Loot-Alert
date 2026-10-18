@@ -20,9 +20,16 @@ abstract final class AppText {
   static const appTitle = TextStyle(
       fontFamily: _font, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: 3.2,
       color: AppColors.textPrimary);
+  /// The Today screen's two big parts: "BONUS FOCUS" and "FEATURED THIS WEEK".
+  static const groupTitle = TextStyle(
+      fontFamily: _font, fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: 3.0,
+      color: AppColors.textPrimary);
+
+  /// Section headers ("PINNACLE OPS", "RAIDS"): bigger than the card titles
+  /// under them, so they're easy to spot while scrolling fast.
   static const sectionHeader = TextStyle(
-      fontFamily: _font, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 2.4,
-      color: AppColors.textSecondary);
+      fontFamily: _font, fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 2.2,
+      color: AppColors.textPrimary);
   static const cardTitle = TextStyle(
       fontFamily: _font, fontSize: 14, fontWeight: FontWeight.w700, letterSpacing: 1.8,
       color: AppColors.textPrimary);

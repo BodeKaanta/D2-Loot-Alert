@@ -4,7 +4,8 @@ import '../models.dart';
 import '../theme.dart';
 import 'banner_image.dart';
 
-/// One activity's card: its banner and title, then its bonus focus weapons.
+/// One activity's card: its banner and name, then its bonus focus weapons.
+/// The category isn't repeated here; the section header above shows it.
 class ActivityCard extends StatelessWidget {
   const ActivityCard({super.key, required this.activity});
 
@@ -23,7 +24,7 @@ class ActivityCard extends StatelessWidget {
           BannerImage(
             url: activity.image,
             height: 72,
-            child: Text(activity.title.toUpperCase(), style: AppText.cardTitle),
+            child: Text(activity.name.toUpperCase(), style: AppText.cardTitle),
           ),
           for (final weapon in activity.weapons) WeaponRow(weapon: weapon),
         ],

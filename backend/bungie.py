@@ -8,7 +8,8 @@ import json
 import urllib.error
 import urllib.request
 
-BASE_URL = "https://www.bungie.net/Platform"
+BUNGIE_URL = "https://www.bungie.net"
+BASE_URL = BUNGIE_URL + "/Platform"
 
 
 class BungieError(RuntimeError):
@@ -19,6 +20,7 @@ class Bungie:
     def __init__(self, api_key):
         self.api_key = api_key
         self._definitions = {}  # cache for this run: (entity type, hash) -> definition
+        self._manifest = None  # manifest index, fetched once per run
 
     def request(self, path, body=None):
         # Passing a body makes urllib send a POST instead of a GET.
@@ -52,18 +54,31 @@ class Bungie:
                 return {}  # don't cache failures; they may be temporary
         return self._definitions[key]
 
-    def activity(self, hash_id):
-        return self.definition("DestinyActivityDefinition", hash_id)
-
     def item(self, hash_id):
         return self.definition("DestinyInventoryItemDefinition", hash_id)
 
     def activity_type(self, hash_id):
         return self.definition("DestinyActivityTypeDefinition", hash_id)
 
+    def manifest(self):
+        """The manifest index: the game data's version and where each definition table lives."""
+        if self._manifest is None:
+            self._manifest = self.request("/Destiny2/Manifest/")
+        return self._manifest
+
     def manifest_version(self):
         """Changes whenever Bungie updates the game data (e.g. a new season or patch)."""
-        return self.request("/Destiny2/Manifest/")["version"]
+        return self.manifest()["version"]
+
+    def definition_table(self, name):
+        """A whole definition table, e.g. every DestinyActivityDefinition, keyed by hash string.
+
+        Fine for activity tables (~11 MB); item definitions are far bigger, so
+        those stay single lookups through item().
+        """
+        path = self.manifest()["jsonWorldComponentContentPaths"]["en"][name]
+        with urllib.request.urlopen(BUNGIE_URL + path, timeout=60) as resp:
+            return json.load(resp)
 
     def character_activities(self, bungie_name):
         """Profile component 204: every character's available activities and their rewards."""

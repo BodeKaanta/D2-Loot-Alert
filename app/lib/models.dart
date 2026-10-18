@@ -34,12 +34,9 @@ class ActivityGroup {
 
   final String id; // same id as its lootPools/{id} document
   final String name;
-  final String category;
+  final String category; // the in-game Portal category, e.g. "Solo Ops"
   final List<Weapon> weapons;
   final String? image;
-
-  /// "Gambit", or "Quickplay · Solo Ops" when the category adds information.
-  String get title => name == category ? name : '$name · $category';
 
   factory ActivityGroup.fromMap(Map<String, dynamic> map) => ActivityGroup(
         id: map['id'] as String? ?? '',
@@ -80,6 +77,16 @@ class Rotation {
         activities: _maps(map['activities']).map(ActivityGroup.fromMap).toList(),
         featured: _maps(map['featured']).map(Featured.fromMap).toList(),
       );
+}
+
+/// Activities grouped under their category, in the order the backend sent them
+/// (the game's Portal order). Dart's map literals keep insertion order.
+Map<String, List<ActivityGroup>> groupByCategory(List<ActivityGroup> activities) {
+  final groups = <String, List<ActivityGroup>>{};
+  for (final activity in activities) {
+    groups.putIfAbsent(activity.category, () => []).add(activity);
+  }
+  return groups;
 }
 
 /// Firestore gives nested lists as `List<dynamic>`; keep only the map entries.

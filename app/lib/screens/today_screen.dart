@@ -58,23 +58,54 @@ class _RotationList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final raids = rotation.featured.where((f) => f.kind == 'raid').toList();
+    final dungeons = rotation.featured.where((f) => f.kind == 'dungeon').toList();
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       children: [
         const _Header(),
-        const SizedBox(height: 24),
-        const SectionHeader('Bonus focus'),
+        const SizedBox(height: 28),
+        const _GroupTitle('Bonus focus'),
         if (rotation.activities.isEmpty)
           const Text('No bonus focus weapons right now.', style: AppText.body),
-        for (final activity in rotation.activities)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: ActivityCard(activity: activity),
-          ),
-        const SizedBox(height: 12),
-        const SectionHeader('Featured this week'),
-        FeaturedGrid(featured: rotation.featured),
+        // One section per in-game Portal category, like the game's own screens.
+        for (final MapEntry(key: category, value: activities)
+            in groupByCategory(rotation.activities).entries) ...[
+          SectionHeader(category),
+          for (final activity in activities)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: ActivityCard(activity: activity),
+            ),
+          const SizedBox(height: 16), // breathing room so each category starts clearly
+        ],
+        const SizedBox(height: 16),
+        const _GroupTitle('Featured this week'),
+        if (raids.isNotEmpty) ...[
+          const SectionHeader('Raids'),
+          FeaturedGrid(featured: raids),
+          const SizedBox(height: 20),
+        ],
+        if (dungeons.isNotEmpty) ...[
+          const SectionHeader('Dungeons'),
+          FeaturedGrid(featured: dungeons),
+        ],
       ],
+    );
+  }
+}
+
+/// "BONUS FOCUS" / "FEATURED THIS WEEK": the two big parts of the screen.
+class _GroupTitle extends StatelessWidget {
+  const _GroupTitle(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Text(title.toUpperCase(), style: AppText.groupTitle),
     );
   }
 }

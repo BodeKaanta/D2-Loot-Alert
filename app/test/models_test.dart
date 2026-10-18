@@ -41,11 +41,18 @@ void main() {
     expect(rotation.featured, isEmpty);
   });
 
-  test('activity title adds the category only when it says something new', () {
+  test('groups activities by category, keeping the backend order', () {
     ActivityGroup group(String name, String category) =>
         ActivityGroup(id: '', name: name, category: category, weapons: const []);
 
-    expect(group('Gambit', 'Gambit').title, 'Gambit');
-    expect(group('Quickplay', 'Solo Ops').title, 'Quickplay · Solo Ops');
+    final grouped = groupByCategory([
+      group('K1 Logistics', 'Solo Ops'),
+      group('Quickplay', 'Solo Ops'),
+      group('The Coil', 'Pinnacle Ops'),
+      group('Gambit', 'Gambit Ops'),
+    ]);
+
+    expect(grouped.keys, ['Solo Ops', 'Pinnacle Ops', 'Gambit Ops']);
+    expect(grouped['Solo Ops']!.map((a) => a.name), ['K1 Logistics', 'Quickplay']);
   });
 }
