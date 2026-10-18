@@ -58,6 +58,25 @@ class Alerts(unittest.TestCase):
         self.assertEqual(alerts.join_names(["A", "B", "C"]), "A, B and C")
 
 
+def previews(*item_hashes):
+    """A live activity whose preview rewards are these items."""
+    return {"visibleRewards": [{"rewardItems": [{"itemQuantity": {"itemHash": h}} for h in item_hashes]}]}
+
+
+class Farmable(unittest.TestCase):
+    def test_rotator_raid_with_raid_gear_is_farmable(self):
+        self.assertTrue(rotation.is_farmable(previews(3808930384, 2782701438)))  # Raid Gear, Deepsight Weapon
+
+    def test_weekly_reward_alongside_real_loot_still_counts(self):
+        self.assertTrue(rotation.is_farmable(previews(3808930384, rotation.WEEKLY_REWARD)))  # Vow: Master
+
+    def test_newest_raid_with_only_weekly_reward_is_not(self):
+        self.assertFalse(rotation.is_farmable(previews(rotation.WEEKLY_REWARD)))  # The Desert Perpetual
+
+    def test_no_previews_is_not(self):
+        self.assertFalse(rotation.is_farmable({}))
+
+
 class NewAlerts(unittest.TestCase):
     now = utc(2026, 10, 17, 21, 7)  # a backup run on the same reset and week
 

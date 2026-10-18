@@ -207,9 +207,16 @@ Verified on 2026-10-17 against d2portal.com and Kyber's Corner. Raw data is in `
 
   - The two "Vanguard Op" types turned out to be Arena Ops and Pinnacle Ops in the game; the Portal tree above settles it.
   - `directActivityModeType` is missing on newer activities such as Vesper's Host and The Desert Perpetual, so don't rely on it.
-- **Featured raids and dungeons:** activities whose type is Raid or Dungeon **and** whose `challenges` list isn't empty.
-  - This matched Kyber's Corner exactly: Vow of the Disciple, Last Wish, Prophecy and Vesper's Host.
-  - The newest raid (The Desert Perpetual) and dungeon (Equilibrium) also have a challenge every week, because they're always available.
+- **Featured (rotator, farmable) raids and dungeons:** activities whose type is Raid or Dungeon, whose `challenges` list isn't empty, **and** whose `visibleRewards` preview real loot (`rotation.is_farmable`).
+  - This matches Kyber's Corner exactly: Vow of the Disciple, Last Wish, Prophecy and Vesper's Host.
+  - **The newest raid (The Desert Perpetual, + Epic) and dungeon (Equilibrium) have a weekly challenge every week too, but they are NOT farmable.** They preview only the "Weekly Reward" item (`3649567221`), meaning loot once a week. Bode spotted this on 2026-10-17, and the reward check excludes them.
+  - The previews seen on 2026-10-17:
+
+    | Raid / dungeon | Preview items |
+    |---|---|
+    | Rotator raids | "Raid Gear" (`3808930384`/`3808930390`) + a guaranteed "Deepsight Weapon" (`2782701438`) |
+    | Other raids | "Deepsight Weapon (Chance)" |
+    | Rotator dungeons | "Powerful Gear" (`735813784`/`3220608786`) |
   - Backup for raids only: public milestones list every raid, but only the featured ones have `challengeObjectiveHashes`. Dungeons aren't in milestones.
 - **`isFocusedActivity`** marks the Portal's featured carousel, **not** the bonus focus. Sparrow Racing League and the Warden of Nothing GM have a bonus focus but the flag is false.
 - **Scale:** each character has 180–230 available activities, about 130 of which show rewards. 24 had a bonus focus on 2026-10-17.
@@ -327,7 +334,7 @@ Flutter app (Android + iOS)
     - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool shape change. 2 = Portal categories (#8).
   - A **weapon** has `itemHash`, `name`, `type` and `icon` (a full URL).
   - A **featured** entry has `id`, `name`, `kind` (`raid` or `dungeon`), `image` and `activityHashes[]`.
-  - The always-available newest raid (The Desert Perpetual, including its Epic version) and dungeon (Equilibrium) also show up as featured.
+  - Only rotator-featured, farmable raids and dungeons appear (see Phase 0 findings). The newest raid and dungeon don't.
 
 - **Security rules** (`firestore.rules`): anyone can read, nobody can write. The backend writes through the Admin SDK, which ignores rules.
 
@@ -343,7 +350,7 @@ Flutter app (Android + iOS)
   - The category is added only when two categories share an activity name, e.g. "Quickplay (Solo Ops) and Quickplay (Vanguard Op)".
   - **Image:** the weapon icon.
 - **Raid/dungeon alert (weekly):** **title only**, e.g. "Vow of the Disciple is featured this week". Bode: players already know the weekly rotation lasts until Tuesday.
-  - The always-available raid and dungeon (The Desert Perpetual, Equilibrium) are alerted every week too. Bode wants that; don't hide them from the watch list.
+  - Only the farmable, rotator-featured ones are alerted. The newest raid and dungeon never are, because they're never "featured" in the farmable sense. (This replaced the earlier plan to alert them every Tuesday.)
 - **Data payload** (strings only), for tap-to-open in #9:
   - weapons: `kind=weapon`, `itemHash`, `activityIds` (comma-separated group ids)
   - raids: `kind=raid|dungeon`, `id`
@@ -352,7 +359,7 @@ Flutter app (Android + iOS)
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
 - **Images on iOS** need a Notification Service Extension in the app (#8). The backend already sets `mutable-content` and `fcm_options.image` on APNs. Android shows the image with no extra work.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
-- **Tests:** run `python -m unittest discover backend` from the repo root (14 tests, standard library only). They cover the reset and week math, alert wording, deduplication, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
+- **Tests:** run `python -m unittest discover backend` from the repo root (18 tests, standard library only). They cover the reset and week math, alert wording, deduplication, the farmable check, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
 - **Watch types are simplified** to "weapon, in any activity" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
@@ -510,6 +517,8 @@ Watch these in the daily snapshots once #6 runs.
 - **2026-10-17:** **In-game Portal categories** (from the Fireteam Finder tree) replace Bungie's internal activity types. The Today screen groups cards under category headers like the game. This was done inside #8, since it's part of getting the Today screen right.
 - **2026-10-17:** **Real banners replace Bungie's placeholder** via the name and playlist fallbacks. The backend downloads whole activity tables instead of making single lookups.
 - **2026-10-17:** **Bungie images appear only as content** (icons, banners), never UI graphics or emblems. The app's style stays "inspired by", not copied.
+- **2026-10-17:** **"Featured" means farmable (the weekly rotator).** The newest raid and dungeon are excluded via the "Weekly Reward"-only preview check, and get no weekly pushes. This supersedes the earlier "alert the always-available ones every Tuesday".
+- **2026-10-17:** Featured cards show only the name; the RAIDS / DUNGEONS header already says the kind.
 - **2026-10-17:** #8 split by platform. The iOS-only work (push key, image extension, iPad testing) is #17, done on the Mac.
 - **2026-10-17:** The push test uses a `test` topic, the same path as real alerts. `getToken()` is deprecated in firebase_messaging 17, and we don't need device tokens.
 - **2026-10-17:** App ID `com.id0.d2lootalert`. The Firebase project lives in Bode's personal Google account.

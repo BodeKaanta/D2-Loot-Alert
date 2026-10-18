@@ -26,6 +26,7 @@ BONUS_FOCUS = "daily_grind_guaranteed"  # uiStyle of a bonus focus reward
 WEAPON = 3                              # DestinyItemType.Weapon
 RAID = 2043403989                       # DestinyActivityTypeDefinition hashes
 DUNGEON = 608898761
+WEEKLY_REWARD = 3649567221              # the "Weekly Reward" preview item: loot only once a week
 RESET_HOUR_UTC = 17
 BUNGIE_URL = "https://www.bungie.net"   # icons and images are paths relative to this
 
@@ -123,6 +124,20 @@ def activity_group(groups, api, data, definition, activity_hash):
     return group
 
 
+def is_farmable(activity):
+    """True if the activity previews real loot, not only the once-a-week "Weekly Reward" item.
+
+    Rotator-featured raids show "Raid Gear" and dungeons show "Powerful Gear". The
+    newest raid and dungeon also have a weekly challenge every week, but preview
+    only "Weekly Reward", so this keeps them off the featured list.
+    """
+    for mapping in activity.get("visibleRewards", []):
+        for reward in mapping.get("rewardItems", []):
+            if reward.get("itemQuantity", {}).get("itemHash") not in (None, WEEKLY_REWARD):
+                return True
+    return False
+
+
 def add_weapon(group, weapon):
     if weapon and all(w["itemHash"] != weapon["itemHash"] for w in group["weapons"]):
         group["weapons"].append(weapon)
@@ -147,9 +162,10 @@ def build_snapshot(api, data, profile, now):
             activity_hash = activity["activityHash"]
             definition = data.activity(activity_hash)
 
-            # A raid or dungeon with a weekly challenge is featured this week.
+            # A raid or dungeon with a weekly challenge and farmable loot is in this
+            # week's rotation (the newest raid/dungeon have a challenge but no farmable loot).
             type_hash = definition.get("activityTypeHash")
-            if has_challenge and type_hash in (RAID, DUNGEON):
+            if has_challenge and type_hash in (RAID, DUNGEON) and is_farmable(activity):
                 name = base_name(definition)
                 entry = featured.setdefault(slug(name), {
                     "id": slug(name),

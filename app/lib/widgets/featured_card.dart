@@ -37,16 +37,9 @@ class FeaturedCard extends StatelessWidget {
       decoration: BoxDecoration(border: Border.all(color: AppColors.border)),
       child: BannerImage(
         url: featured.image,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(featured.name.toUpperCase(),
-                style: AppText.cardTitle, maxLines: 2, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 2),
-            Text(featured.kind.toUpperCase(), style: AppText.label),
-          ],
-        ),
+        // Just the name: the RAIDS / DUNGEONS header above already says what it is.
+        child: Text(featured.name.toUpperCase(),
+            style: AppText.cardTitle, maxLines: 2, overflow: TextOverflow.ellipsis),
       ),
     );
   }
