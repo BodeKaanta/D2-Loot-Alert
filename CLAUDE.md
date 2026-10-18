@@ -343,12 +343,76 @@ Flutter app (Android + iOS)
 
 ### App (Flutter)
 
-- **Packages:** `firebase_core`, `firebase_messaging`, `cloud_firestore`, plus a small local store for the watch list (e.g. `shared_preferences`).
-- **Screens:**
-  - Today: every activity's bonus focus and the featured raids and dungeons
-  - Browse: activity → loot pool → watch toggle
-  - Raids & Dungeons: watch toggles
-- **Custom look:** not stock Material. Decide the direction in #8.
+Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, and the app ID is `com.id0.d2lootalert` on both platforms. The display name is "D2 Loot Alert".
+
+- **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17.
+  - #9 will likely add a small local store for the watch list, e.g. `shared_preferences`. Ask first.
+  - `getToken()` is deprecated in `firebase_messaging` 17 (replaced by `register()`/`onRegistered`). We don't need tokens, only topics.
+- **Code layout** (`app/lib/`):
+
+  | File | What it does |
+  |---|---|
+  | `main.dart` | Firebase init; registers the Inter license |
+  | `theme.dart` | `AppColors`, `AppText`, `buildTheme()` |
+  | `models.dart` | Defensive parsing of the Firestore docs |
+  | `reset.dart` | Next daily reset and countdown text |
+  | `push.dart` | Permission and topic subscribe |
+  | `screens/` | Today, About |
+  | `widgets/` | Section header, banner image, activity card with weapon rows, featured grid and card, reset countdown |
+
+- **Today screen:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
+- **Screens still to come (#9):** Browse (activity → loot pool → watch toggle) and Raids & Dungeons (watch toggles), probably behind a bottom tab bar.
+- **Tests:** `flutter test` and `flutter analyze` (both clean as of #8). They cover model parsing and reset math.
+
+### Design system (agreed with Bode in #8)
+
+- **Look:** close to Bungie's own in-game and website style. Dark, and **not stock Material**.
+- **Colors** (`AppColors`):
+  - background `#0B0E11`, cards `#151A1F`
+  - 1 px borders at 15% white (item tiles at 30%)
+  - text `#E9E7E2`, secondary text `#8B939C`
+  - exotic gold `#CEAE33`
+- **Type:** **Inter** (SIL OFL 1.1, bundled in `app/assets/fonts/` with `Inter-OFL.txt`, which must stay).
+  - Headers are uppercase with wide letter spacing (`AppText.appTitle`, `sectionHeader`, `cardTitle`, `label`). Widgets call `.toUpperCase()` themselves.
+  - Destiny's own font, reportedly Neue Haas Grotesk, is commercial, so we don't use it.
+- **Shapes:** square corners everywhere, no ripple (`NoSplash`), thin 1 px borders. Weapon icons sit in square tiles like Destiny's inventory.
+- **Art rules:**
+  - **No AI-generated art, ever.**
+  - **Images only from the Bungie API:** weapon icons and activity `pgcrImage` banners, shown dimmed under a gradient. **No bungie.net concept art** for now; it's Bungie-owned, and Apple flags third-party IP.
+  - **Credits** live on the About screen: "Destiny imagery © Bungie, Inc." plus the not-affiliated disclaimer and the Inter credit.
+  - **The app icon** will be made by Bode's artist friend (the iOS tester). No Bungie or Destiny logos. Specs: 1024×1024 PNG with no transparency, plus optional Android foreground and background layers. Credit him on the About screen if he wants; Bode will ask.
+- **Known data quirks:**
+  - Some activities share Bungie's generic banner image (e.g. The Coil, Gambit and Quickplay: Master all show the same one).
+  - Bungie's category names can look odd, e.g. "Crawl", "Mission", "Vanguard Op".
+
+### App setup on a new machine (including Bode's Mac)
+
+The Firebase client config files are **gitignored** (`app/lib/firebase_options.dart`, `app/android/app/google-services.json`, `app/ios/Runner/GoogleService-Info.plist`). They aren't secret, but Bode chose to keep them out of the public repo's history. Committing and deleting them later wouldn't remove them from history. Each machine regenerates them:
+
+1. Install Flutter, Node, and the Firebase CLI (`npm install -g firebase-tools`).
+2. Log in with the **personal** Google account: `firebase login`. If the CLI already uses the other app's account, run `firebase login:add`, then `firebase login:use <personal email>` in the repo.
+3. Install the FlutterFire CLI: `dart pub global activate flutterfire_cli`.
+4. In `app/`, run:
+   ```
+   flutterfire configure --project=d2-loot-alert --platforms=android,ios --android-package-name=com.id0.d2lootalert --ios-bundle-id=com.id0.d2lootalert --yes
+   ```
+   It reuses the apps registered in #8, so nothing new gets created in Firebase.
+   - Copying the files from the PC works too.
+5. **Mac / iOS extras** (#17):
+   - Install Xcode and CocoaPods. Flutter runs `pod install` on the first iOS build.
+   - Set the signing team in Xcode (Runner target → Signing & Capabilities).
+   - The push key, capabilities and Notification Service Extension are all in #17.
+
+### Running and testing the app on Bode's PC
+
+- **Pixel:** run from Android Studio, or `flutter run` with the phone connected.
+- **Emulator** (`Medium_Phone_API_36.1`): it only has about 450 MB free, so the 150 MB all-CPU debug APK won't install. Build just its CPU type instead: `flutter build apk --debug --target-platform android-x64 --split-per-abi`, then `adb install -r build/app/outputs/flutter-apk/app-x86_64-debug.apk`.
+  - The emulator also has Bode's `hand_speed_calculator` app. **Don't uninstall it or wipe the emulator.**
+- **From Git Bash,** set `MSYS_NO_PATHCONV=1` before `adb shell` commands with `/` paths, or Git Bash rewrites them. adb is at `C:/Users/bodek/AppData/Local/Android/sdk/platform-tools/adb.exe`.
+- **Push test** (debug builds only):
+  1. In the app, open About → **Enable notifications**. It asks permission and subscribes to topic `test`.
+  2. Put the app in the background.
+  3. In the Firebase console → **Messaging** → new campaign → Firebase Notification messages, set the target to **Topic** `test`, and send.
 
 ## Roadmap
 
@@ -358,8 +422,9 @@ Flutter app (Android + iOS)
 | #4 | Phase 0: Bungie API test script (Python) | M | Done |
 | #5 | Firebase project setup | S | Done |
 | #6 | Backend: daily rotation job (Cloud Function) | M | Done |
-| #7 | Backend: push notifications for bonus drops and featured raids | S | In progress |
-| #8 | Flutter app setup and Today screen | M | Backlog |
+| #7 | Backend: push notifications for bonus drops and featured raids | S | Done |
+| #8 | Flutter app setup and Today screen (Android/PC) | M | In progress |
+| #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
 | #9 | Watch screens: browse loot pools and raids, toggle alerts | M | Backlog |
 | #10 | Release: Android APK and iOS TestFlight | M | Backlog |
 | later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
@@ -378,9 +443,11 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-- **#6:** deployed and verified on 2026-10-17. Merged.
-- **#7** (branch `task_7_push_notifications`): alerts written, unit tests pass, and the dry run plus local message encoding check out. Next: deploy, Force run, then check `meta/state` for the sent topics and the "Sent N of N new alerts" log line.
-- **Next after #7:** #8, the Flutter app setup and Today screen. That's the first time a real phone subscribes to a topic and receives a push.
+- **Backend (#6, #7):** deployed and merged. It runs daily at 17:07 UTC plus backups, and sends alerts. A forced run on 2026-10-17 sent all 20 alerts and FCM accepted them.
+- **#8** (branch `task_8_flutter_app_today_screen`): Flutter app created and registered with Firebase. Theme, Today screen and About screen built.
+  - Verified on the emulator: live data, featured grid, About screen, notification permission and `test` topic subscription.
+  - **Remaining:** Bode's real push test on the Pixel, then the PR.
+- **Next:** #9 (watch screens), then #17 on the Mac.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
 ## Decision log
@@ -410,6 +477,11 @@ Watch these in the daily snapshots once #6 runs.
   - Bode accepted Blaze on the condition that bills stay very unlikely. See the free-allowance table under Firebase project.
 - **2026-10-17:** Python 3.11 runtime, matching Bode's local Python. Bungie API key and name stored in Cloud Secret Manager.
 - **2026-10-17:** Loot pools cover every available activity with weapons in its `rewards` (74 on 2026-10-17). They're rebuilt only when the manifest version changes.
+- **2026-10-17:** **App art policy:** only Bungie API images, credited to Bungie on an About screen. No bungie.net concept art for now, no AI-generated art ever. The app icon comes from Bode's artist friend.
+- **2026-10-17:** **Font: Inter** (free, OFL) instead of Destiny's commercial font. The look follows Bungie's dark in-game style; the Today screen layout was approved from a mockup.
+- **2026-10-17:** **Firebase client config files are gitignored;** each machine runs `flutterfire configure`.
+- **2026-10-17:** #8 split by platform. The iOS-only work (push key, image extension, iPad testing) is #17, done on the Mac.
+- **2026-10-17:** The push test uses a `test` topic, the same path as real alerts. `getToken()` is deprecated in firebase_messaging 17, and we don't need device tokens.
 - **2026-10-17:** App ID `com.id0.d2lootalert`. The Firebase project lives in Bode's personal Google account.
 - **2026-10-17:** Vendor weapon alerts are a later task (they need OAuth). Xûr's exotic armor alerts are task #13, after #7.
 - **2026-10-17:** Backend schedule: one run shortly after reset plus two backup runs, with alerts sent only once per reset.

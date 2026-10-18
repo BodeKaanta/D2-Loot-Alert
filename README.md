@@ -47,7 +47,7 @@ The app is planned to:
 
 | Area | Choice |
 |---|---|
-| App | Flutter (Android + iOS), with a custom design |
+| App | Flutter (Android + iOS), with a Destiny-style design and the Inter font |
 | Backend | Cloud Functions for Firebase (Python), on a schedule |
 | Database | Cloud Firestore |
 | Notifications | Firebase Cloud Messaging (topics) |
@@ -72,11 +72,12 @@ The app is planned to:
 | Task | Goal | Status |
 |---|---|---|
 | Phase 0: API test | Script that pulls live data and confirms how bonus focus and featured raids appear in the API | Done |
-| Firebase setup | Project on the free plan, database, backend secrets | Done |
+| Firebase setup | Project, database and secrets | Done |
 | Daily rotation job | Scheduled function that saves each day's rotation | Done |
-| Push notifications | Alerts for bonus focus weapons and featured raids | Not started |
+| Push notifications | Alerts for bonus focus weapons and featured raids | Done |
 | Xûr alerts | Alerts when Xûr sells an exotic armor piece you want | Not started |
-| App: Today screen | Flutter app with a custom look, showing today's rotation | Not started |
+| App: Today screen | Flutter app with a Destiny-style look, showing today's rotation | In progress |
+| iOS setup | Push key, notification images and iPad testing on the Mac | Not started |
 | App: watch screens | Browse loot pools and raids, toggle alerts | Not started |
 | Release | Android APK and iOS TestFlight | Not started |
 
