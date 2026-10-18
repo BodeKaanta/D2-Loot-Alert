@@ -1,0 +1,40 @@
+name: d2lootalert
+description: "Alerts for Destiny 2 bonus focus weapons and featured raids."
+publish_to: 'none' # private app, never published to pub.dev
+
+# versionName+versionCode on Android, CFBundleShortVersionString+CFBundleVersion on iOS.
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_core: ^5.0.0       # starts Firebase (needed by the two below)
+  cloud_firestore: ^7.0.0     # reads rotation/current and the loot pools
+  firebase_messaging: ^17.0.0 # push notifications and topic subscriptions
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true # Material icons (info, refresh...)
+
+  assets:
+    - assets/fonts/Inter-OFL.txt # shown on the licenses page; the OFL requires shipping it
+
+  # Inter (SIL Open Font License 1.1), https://rsms.me/inter
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700

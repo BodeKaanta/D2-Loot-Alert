@@ -20,13 +20,23 @@ from pathlib import Path
 
 import alerts
 from bungie import Bungie
+from game_data import GameData, base_name
 
 BONUS_FOCUS = "daily_grind_guaranteed"  # uiStyle of a bonus focus reward
 WEAPON = 3                              # DestinyItemType.Weapon
 RAID = 2043403989                       # DestinyActivityTypeDefinition hashes
 DUNGEON = 608898761
+WEEKLY_REWARD = 3649567221              # the "Weekly Reward" preview item: loot only once a week
 RESET_HOUR_UTC = 17
 BUNGIE_URL = "https://www.bungie.net"   # icons and images are paths relative to this
+
+# The order the app lists categories in: the game's own Portal list, then Gambit.
+# Anything else (e.g. an activity outside the Portal) comes after, alphabetically.
+CATEGORY_ORDER = ["Solo Ops", "Fireteam Ops", "Arena Ops", "Pinnacle Ops", "Crucible Ops", "Gambit Ops"]
+
+# Bump when the shape or IDs of lootPools documents change, to force a rebuild
+# even if Bungie's game data hasn't changed. 2 = in-game Portal categories (#8).
+POOLS_SCHEMA = 2
 
 
 def reset_id(now):
@@ -42,13 +52,6 @@ def week_id(now):
     reset_day = (now - timedelta(hours=RESET_HOUR_UTC)).date()
     days_since_tuesday = (reset_day.weekday() - 1) % 7  # weekday(): Monday = 0, Tuesday = 1
     return (reset_day - timedelta(days=days_since_tuesday)).isoformat()
-
-
-def base_name(definition):
-    """'Gambit: Matchmade' and 'Gambit: Customize' share the base name 'Gambit'."""
-    return (definition.get("originalDisplayProperties", {}).get("name")
-            or definition.get("displayProperties", {}).get("name")
-            or "Unknown")
 
 
 def slug(text):
@@ -70,10 +73,21 @@ def unique_activity_hashes(profile):
     return hashes
 
 
-def category_name(api, type_hash):
-    """'Gambit', 'The Crucible', 'Solo Ops'... from the activity's type."""
+def category_name(api, data, activity_hash, definition):
+    """The in-game Portal category ('Solo Ops', 'Gambit Ops'...).
+
+    Outside the Portal, falls back to Bungie's activity type name.
+    """
+    portal = data.portal_category(activity_hash)
+    if portal:
+        return portal
+    type_hash = definition.get("activityTypeHash")
     name = api.activity_type(type_hash).get("displayProperties", {}).get("name") if type_hash else None
     return name or "Other"
+
+
+def category_rank(category):
+    return CATEGORY_ORDER.index(category) if category in CATEGORY_ORDER else len(CATEGORY_ORDER)
 
 
 def weapon_info(api, item_hash):
@@ -89,19 +103,19 @@ def weapon_info(api, item_hash):
     }
 
 
-def activity_group(groups, api, definition, activity_hash):
+def activity_group(groups, api, data, definition, activity_hash):
     """Find or create the group this activity variant belongs to.
 
     Variants like "Customize"/"Matchmade" share a base name and category, so the
     app sees them as one activity.
     """
-    category = category_name(api, definition.get("activityTypeHash"))
+    category = category_name(api, data, activity_hash, definition)
     name = base_name(definition)
     group = groups.setdefault(slug(f"{category} {name}"), {
         "id": slug(f"{category} {name}"),
         "name": name,
         "category": category,
-        "image": image_url(definition.get("pgcrImage")),
+        "image": image_url(data.banner(activity_hash)),
         "activityHashes": [],
         "weapons": [],
     })
@@ -110,12 +124,26 @@ def activity_group(groups, api, definition, activity_hash):
     return group
 
 
+def is_farmable(activity):
+    """True if the activity previews real loot, not only the once-a-week "Weekly Reward" item.
+
+    Rotator-featured raids show "Raid Gear" and dungeons show "Powerful Gear". The
+    newest raid and dungeon also have a weekly challenge every week, but preview
+    only "Weekly Reward", so this keeps them off the featured list.
+    """
+    for mapping in activity.get("visibleRewards", []):
+        for reward in mapping.get("rewardItems", []):
+            if reward.get("itemQuantity", {}).get("itemHash") not in (None, WEEKLY_REWARD):
+                return True
+    return False
+
+
 def add_weapon(group, weapon):
     if weapon and all(w["itemHash"] != weapon["itemHash"] for w in group["weapons"]):
         group["weapons"].append(weapon)
 
 
-def build_snapshot(api, profile, now):
+def build_snapshot(api, data, profile, now):
     """Today's bonus focus weapons per activity, plus this week's featured raids and dungeons."""
     activities = {}
     featured = {}
@@ -132,17 +160,18 @@ def build_snapshot(api, profile, now):
                 continue  # most activities; skipping them saves a lot of lookups
 
             activity_hash = activity["activityHash"]
-            definition = api.activity(activity_hash)
+            definition = data.activity(activity_hash)
 
-            # A raid or dungeon with a weekly challenge is featured this week.
+            # A raid or dungeon with a weekly challenge and farmable loot is in this
+            # week's rotation (the newest raid/dungeon have a challenge but no farmable loot).
             type_hash = definition.get("activityTypeHash")
-            if has_challenge and type_hash in (RAID, DUNGEON):
+            if has_challenge and type_hash in (RAID, DUNGEON) and is_farmable(activity):
                 name = base_name(definition)
                 entry = featured.setdefault(slug(name), {
                     "id": slug(name),
                     "name": name,
                     "kind": "raid" if type_hash == RAID else "dungeon",
-                    "image": image_url(definition.get("pgcrImage")),
+                    "image": image_url(data.banner(activity_hash)),
                     "activityHashes": [],
                 })
                 if activity_hash not in entry["activityHashes"]:
@@ -151,26 +180,27 @@ def build_snapshot(api, profile, now):
             # Armor focus differs per class and is out of scope, so keep weapons only.
             weapons = [w for w in (weapon_info(api, h) for h in focus_hashes) if w]
             if weapons:
-                group = activity_group(activities, api, definition, activity_hash)
+                group = activity_group(activities, api, data, definition, activity_hash)
                 for weapon in weapons:
                     add_weapon(group, weapon)
 
     return {
         "resetId": reset_id(now),
         "updatedAt": now.isoformat(),
-        "activities": sorted(activities.values(), key=lambda a: (a["category"], a["name"])),
+        "activities": sorted(activities.values(),
+                             key=lambda a: (category_rank(a["category"]), a["category"], a["name"])),
         "featured": sorted(featured.values(), key=lambda f: (f["kind"], f["name"])),
     }
 
 
-def build_loot_pools(api, profile):
+def build_loot_pools(api, data, profile):
     """Every activity's weapon pool, from the reward lists in Bungie's game data.
 
-    Slow (a few hundred lookups), so run() only calls it when the game data changes.
+    Slow (a few hundred item lookups), so run() only calls it when the game data changes.
     """
     pools = {}
     for activity_hash in unique_activity_hashes(profile):
-        definition = api.activity(activity_hash)
+        definition = data.activity(activity_hash)
         weapons = []
         for reward_group in definition.get("rewards", []):
             for reward in reward_group.get("rewardItems", []):
@@ -178,7 +208,7 @@ def build_loot_pools(api, profile):
         weapons = [w for w in weapons if w]
         if not weapons:
             continue
-        pool = activity_group(pools, api, definition, activity_hash)
+        pool = activity_group(pools, api, data, definition, activity_hash)
         for weapon in weapons:
             add_weapon(pool, weapon)
     for pool in pools.values():
@@ -198,6 +228,17 @@ def new_alerts(snapshot, state, now):
     return to_send, sent_weapons, sent_raids
 
 
+def save_loot_pools(db, pools):
+    """Write every pool, and delete pools left over from older IDs (e.g. old category names)."""
+    batch = db.batch()
+    for pool_id, pool in pools.items():
+        batch.set(db.document(f"lootPools/{pool_id}"), pool)
+    for old in db.collection("lootPools").list_documents():
+        if old.id not in pools:
+            batch.delete(old)
+    batch.commit()
+
+
 def run(api_key, bungie_name, db):
     """One scheduled run: fetch today's rotation, save it to Firestore and send new alerts.
 
@@ -207,24 +248,23 @@ def run(api_key, bungie_name, db):
     now = datetime.now(timezone.utc)
     api = Bungie(api_key)
     profile = api.character_activities(bungie_name)
-    snapshot = build_snapshot(api, profile, now)
+    data = GameData.download(api)
+    snapshot = build_snapshot(api, data, profile, now)
     print(f"Reset {snapshot['resetId']}: {len(snapshot['activities'])} activities with a weapon focus, "
           f"{len(snapshot['featured'])} featured raids/dungeons")
 
     db.document("rotation/current").set(snapshot)
     db.document(f"history/{snapshot['resetId']}").set(snapshot)
 
-    # Loot pools only change when Bungie updates the game data (manifest),
-    # and rebuilding them takes a few hundred lookups, so skip it otherwise.
+    # Loot pools only change when Bungie updates the game data (manifest) or we
+    # change their format, and rebuilding them takes a few hundred item lookups,
+    # so skip it otherwise.
     state_ref = db.document("meta/state")
     state = state_ref.get().to_dict() or {}
     manifest_version = api.manifest_version()
-    if state.get("manifestVersion") != manifest_version:
-        pools = build_loot_pools(api, profile)
-        batch = db.batch()
-        for pool_id, pool in pools.items():
-            batch.set(db.document(f"lootPools/{pool_id}"), pool)
-        batch.commit()
+    if state.get("manifestVersion") != manifest_version or state.get("poolsSchema") != POOLS_SCHEMA:
+        pools = build_loot_pools(api, data, profile)
+        save_loot_pools(db, pools)
         print(f"Rebuilt {len(pools)} loot pools for manifest {manifest_version}")
 
     to_send, sent_weapons, sent_raids = new_alerts(snapshot, state, now)
@@ -233,6 +273,7 @@ def run(api_key, bungie_name, db):
 
     state_ref.set({
         "manifestVersion": manifest_version,
+        "poolsSchema": POOLS_SCHEMA,
         "lastResetId": snapshot["resetId"],
         "lastRunAt": now.isoformat(),
         # What has been alerted, so backup runs only send what's new.
@@ -249,10 +290,12 @@ def dry_run():
     now = datetime.now(timezone.utc)
     api = Bungie(os.environ["BUNGIE_API_KEY"])
     profile = api.character_activities(os.environ["BUNGIE_NAME"])
-    snapshot = build_snapshot(api, profile, now)
+    data = GameData.download(api)
+    snapshot = build_snapshot(api, data, profile, now)
     print(f"Reset {snapshot['resetId']}")
     for a in snapshot["activities"]:
-        print(f"  {a['category']:14} {a['name']:28} {', '.join(w['name'] for w in a['weapons'])}")
+        image = (a["image"] or "(no banner)").rsplit("/", 1)[-1]
+        print(f"  {a['category']:13} {a['name']:24} {', '.join(w['name'] for w in a['weapons']):26} {image}")
     print("Featured: " + ", ".join(f"{f['name']} ({f['kind']})" for f in snapshot["featured"]))
 
     to_send, _, _ = new_alerts(snapshot, {}, now)  # empty state: as if nothing was sent yet
@@ -267,7 +310,7 @@ def dry_run():
 
     if "--skip-pools" not in sys.argv:
         print("Building loot pools (takes a few minutes)...")
-        pools = build_loot_pools(api, profile)
+        pools = build_loot_pools(api, data, profile)
         print(f"{len(pools)} loot pools")
         (out / "loot_pools.json").write_text(json.dumps(pools, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Saved to {out}")

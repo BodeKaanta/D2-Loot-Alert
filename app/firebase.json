@@ -1,0 +1,1 @@
+{"flutter":{"platforms":{"android":{"default":{"projectId":"d2-loot-alert","appId":"1:990740841338:android:a45bc604cfad3cf828ccc3","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"d2-loot-alert","configurations":{"android":"1:990740841338:android:a45bc604cfad3cf828ccc3","ios":"1:990740841338:ios:d8bcb1e4f1c0dfcc28ccc3"}}}}}}
