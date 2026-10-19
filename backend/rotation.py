@@ -108,6 +108,9 @@ def weapon_info(api, item_hash):
         "name": name,
         "type": item.get("itemTypeDisplayName", ""),
         "icon": image_url(item["displayProperties"].get("icon")),
+        # A 16:9 render of the weapon. The expanded alert shows it when the
+        # activity has no banner of its own (#30).
+        "screenshot": image_url(item.get("screenshot")),
     }
 
 

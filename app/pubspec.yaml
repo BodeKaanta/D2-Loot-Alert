@@ -15,6 +15,7 @@ dependencies:
   cloud_firestore: ^7.0.0     # reads rotation/current and the loot pools
   firebase_messaging: ^17.0.0 # push notifications and topic subscriptions
   shared_preferences: ^2.5.6  # remembers the watch list on the phone
+  flutter_local_notifications: ^22.3.2 # draws Android alerts: weapon icon, banner when expanded (#30)
 
 # Pinned (#21): shared_preferences_android 2.5.0 (2026-10-17) crashes release
 # builds at startup. Its new JNI bridge calls a method that code shrinking (R8)

@@ -64,6 +64,39 @@ class Alerts(unittest.TestCase):
         self.assertEqual(alert["topic"], "weapon_whatchamacallit")
         self.assertEqual(alert["body"], "Bonus focus in Warden of Nothing and Midtown")
 
+    def test_alert_data_has_what_android_draws(self):
+        snapshot = {"activities": [
+            {"id": "solo-ops-quickplay", "name": "Quickplay", "category": "Solo Ops", "image": None,
+             "weapons": [weapon(1, "Ecliptic Distaff")]},
+            {"id": "solo-ops-quickplay-master", "name": "Quickplay: Master", "category": "Solo Ops",
+             "image": "https://example/quickplay.jpg", "weapons": [weapon(1, "Ecliptic Distaff")]},
+        ]}
+        [alert] = alerts.weapon_alerts(snapshot)
+        self.assertEqual(alerts.fcm_data(alert), {
+            "kind": "weapon", "weaponId": "ecliptic-distaff",
+            "activityIds": "solo-ops-quickplay,solo-ops-quickplay-master",
+            "title": "Ecliptic Distaff is a bonus drop today",
+            "body": "Bonus focus in Quickplay and Quickplay: Master",
+            "icon": "https://example/1.png",
+            "banner": "https://example/quickplay.jpg",  # the first activity has no banner, so the next one's
+        })
+
+    def test_without_an_activity_banner_the_weapon_screenshot_is_used(self):
+        reckless = {**weapon(3085559077, "Reckless Endangerment"), "screenshot": "https://example/reckless.jpg"}
+        snapshot = {"activities": [{"id": "solo-ops-typhon-imperator", "name": "Typhon Imperator",
+                                    "category": "Solo Ops", "image": None, "weapons": [reckless]}]}
+        [alert] = alerts.weapon_alerts(snapshot)
+        self.assertEqual(alert["banner"], "https://example/reckless.jpg")
+
+    def test_raid_alert_data_has_its_banner_and_no_empty_fields(self):
+        snapshot = {"featured": [{"id": "last-wish", "name": "Last Wish", "kind": "raid",
+                                  "image": "https://example/last-wish.jpg"}]}
+        [alert] = alerts.raid_alerts(snapshot)
+        self.assertEqual(alerts.fcm_data(alert), {
+            "kind": "raid", "id": "last-wish", "title": "Last Wish is featured this week",
+            "banner": "https://example/last-wish.jpg",  # no body or icon: left out, not "None"
+        })
+
     def test_raid_alerts_are_title_only(self):
         [alert] = alerts.raid_alerts(SNAPSHOT)
         self.assertEqual((alert["topic"], alert["title"], alert["body"]),
@@ -91,7 +124,7 @@ class WeaponIds(unittest.TestCase):
     def test_versions_share_an_id_and_are_listed_once(self):
         def adored(icon):
             return {"itemType": rotation.WEAPON, "itemTypeDisplayName": "Sniper Rifle",
-                    "displayProperties": {"name": "Adored", "icon": icon}}
+                    "displayProperties": {"name": "Adored", "icon": icon}, "screenshot": "/adored.jpg"}
         api = FakeItems({891765152: adored("/gm.jpg"), 1405095983: adored("/regular.jpg")})
         gm, regular = rotation.weapon_info(api, 891765152), rotation.weapon_info(api, 1405095983)
         self.assertEqual((gm["id"], regular["id"]), ("adored", "adored"))
