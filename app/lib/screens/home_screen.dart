@@ -47,12 +47,13 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  /// Weapon alerts open Today (where the bonus focus is); raid and dungeon alerts
-  /// open Raids & Dungeons. `kind` comes from the alert's data (backend/alerts.py).
+  /// Weapon and Xûr alerts open Today (where the bonus focus and his stock are);
+  /// raid and dungeon alerts open Raids & Dungeons. `kind` comes from the alert's
+  /// data (backend/alerts.py).
   void _openTabFor(String? kind) {
     if (!mounted || kind == null) return;
     final tab = switch (kind) {
-      'weapon' => _today,
+      'weapon' || 'xur' => _today,
       'raid' || 'dungeon' => _raids,
       _ => _tab,
     };

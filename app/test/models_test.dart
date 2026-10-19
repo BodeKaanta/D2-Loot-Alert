@@ -86,6 +86,28 @@ void main() {
     expect(loot.single.weapons.single.onlyIn, isEmpty); // the same weapon as the main pool's
   });
 
+  test('Xûr: his stock and the catalog parse, and armor says its class (#13)', () {
+    final rotation = Rotation.fromMap({
+      'xur': [
+        {'id': 'omnioculus', 'name': 'Omnioculus', 'class': 'Hunter', 'slot': 'Chest Armor', 'icon': 'https://x/o.jpg'},
+      ],
+    });
+    expect(rotation.xur.single.description, 'Hunter chest armor');
+    expect(Rotation.fromMap({}).xur, isEmpty); // not in the game, or an older document
+
+    final catalog = ExoticArmorCatalog.fromMap({
+      'armor': [
+        {'id': 'stoicism', 'name': 'Stoicism', 'class': 'Titan', 'slot': 'Titan Mark'},
+      ],
+      'xurImage': 'https://x/tower_xur.jpg',
+      'classImages': {'Titan': 'https://x/heart.jpg', 'Hunter': 7}, // a wrong type is skipped
+    });
+    expect(catalog.armor.single.description, 'Titan Mark'); // class items already name the class
+    expect(catalog.xurImage, 'https://x/tower_xur.jpg');
+    expect(catalog.classImages, {'Titan': 'https://x/heart.jpg'});
+    expect(ExoticArmorCatalog.fromMap(null).armor, isEmpty); // no catalog written yet
+  });
+
   test('groups activities by category, keeping the backend order', () {
     ActivityGroup group(String name, String category) =>
         ActivityGroup(id: '', name: name, category: category, weapons: const []);

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/activity_card.dart';
+import '../widgets/armor_row.dart';
 import '../widgets/featured_card.dart';
 import '../widgets/reset_countdown.dart';
 import '../widgets/section_header.dart';
@@ -89,6 +90,12 @@ class _RotationList extends StatelessWidget {
         if (dungeons.isNotEmpty) ...[
           const SectionHeader('Dungeons'),
           FeaturedGrid(featured: dungeons, showBells: true),
+        ],
+        // Only while he's in the game, Friday to the Tuesday reset (#13).
+        if (rotation.xur.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          const SectionHeader('Xûr'),
+          for (final armor in rotation.xur) ArmorRow(armor: armor),
         ],
       ],
     );

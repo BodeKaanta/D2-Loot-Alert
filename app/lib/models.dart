@@ -70,6 +70,64 @@ class Featured {
       );
 }
 
+/// An exotic armor piece (#13): one Xûr is selling (rotation/current.xur), or one
+/// in the full list people pick from (catalog/exoticArmor).
+class ExoticArmor {
+  const ExoticArmor({required this.id, required this.name, required this.guardianClass, required this.slot, this.icon});
+
+  final String id; // the name slug, same as weapons (#26); its alert topic is xur_<id>
+  final String name;
+  final String guardianClass; // "Titan", "Hunter" or "Warlock"
+  final String slot; // e.g. "Chest Armor"
+  final String? icon; // full https URL on bungie.net
+
+  /// "Hunter chest armor", since exotic names don't say which class they're for.
+  /// Class items already name the class ("Titan Mark"). Matches backend/alerts.py.
+  String get description => guardianClass.isEmpty || slot.startsWith(guardianClass)
+      ? slot
+      : '$guardianClass ${slot.toLowerCase()}';
+
+  factory ExoticArmor.fromMap(Map<String, dynamic> map) => ExoticArmor(
+        id: map['id'] as String? ?? '',
+        name: map['name'] as String? ?? 'Unknown armor',
+        guardianClass: map['class'] as String? ?? '',
+        slot: map['slot'] as String? ?? '',
+        icon: map['icon'] as String?,
+      );
+
+  Map<String, dynamic> toMap() =>
+      {'id': id, 'name': name, 'class': guardianClass, 'slot': slot, 'icon': icon};
+}
+
+/// The classes in the game's order, for grouping exotic armor.
+const guardianClasses = ['Titan', 'Hunter', 'Warlock'];
+
+/// The catalog/exoticArmor document: every exotic armor piece (in class order),
+/// plus the banners for the Xûr cards.
+class ExoticArmorCatalog {
+  const ExoticArmorCatalog({this.armor = const [], this.xurImage, this.classImages = const {}});
+
+  final List<ExoticArmor> armor;
+  final String? xurImage; // Xûr at his spot in the Tower, for the XÛR card on LOOT
+  final Map<String, String> classImages; // class -> one exotic's screenshot, for the class cards
+
+  /// Null (no catalog written yet) gives an empty catalog.
+  factory ExoticArmorCatalog.fromMap(Map<String, dynamic>? map) {
+    final classImages = <String, String>{};
+    final images = map?['classImages'];
+    if (images is Map) {
+      images.forEach((cls, url) {
+        if (url is String) classImages['$cls'] = url;
+      });
+    }
+    return ExoticArmorCatalog(
+      armor: _maps(map?['armor']).map(ExoticArmor.fromMap).toList(),
+      xurImage: map?['xurImage'] as String?,
+      classImages: classImages,
+    );
+  }
+}
+
 /// The rotation/current document.
 class Rotation {
   const Rotation({
@@ -77,6 +135,7 @@ class Rotation {
     required this.activities,
     required this.featured,
     this.raidsAndDungeons = const [],
+    this.xur = const [],
   });
 
   final String resetId; // date of the daily reset, e.g. "2026-10-17"
@@ -86,11 +145,15 @@ class Rotation {
   /// Every raid and dungeon that can rotate in, for the watch toggles.
   final List<Featured> raidsAndDungeons;
 
+  /// The exotic armor Xûr is selling; empty when he's not in the game (#13).
+  final List<ExoticArmor> xur;
+
   factory Rotation.fromMap(Map<String, dynamic> map) => Rotation(
         resetId: map['resetId'] as String? ?? '',
         activities: _maps(map['activities']).map(ActivityGroup.fromMap).toList(),
         featured: _maps(map['featured']).map(Featured.fromMap).toList(),
         raidsAndDungeons: _maps(map['raidsAndDungeons']).map(Featured.fromMap).toList(),
+        xur: _maps(map['xur']).map(ExoticArmor.fromMap).toList(),
       );
 }
 
