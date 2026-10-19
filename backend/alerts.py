@@ -1,14 +1,14 @@
 """Push alerts (issue #7): one FCM topic message per bonus focus weapon (daily)
 and per featured raid or dungeon (weekly).
 
-Phones subscribe to a topic when the user watches something (weapon_<itemHash>,
+Phones subscribe to a topic when the user watches something (weapon_<id>,
 raid_<id>), so the backend never stores who is watching what. rotation.run()
 decides which alerts are new; this module only builds and sends them.
 """
 
 
-def weapon_topic(item_hash):
-    return f"weapon_{item_hash}"
+def weapon_topic(weapon_id):
+    return f"weapon_{weapon_id}"  # the name slug, shared by every version of the weapon (#26)
 
 
 def raid_topic(raid_id):
@@ -37,22 +37,26 @@ def activity_labels(activities):
 
 
 def weapon_alerts(snapshot):
-    """One alert per weapon, naming every activity where it's the bonus focus today."""
+    """One alert per weapon, naming every activity where it's the bonus focus today.
+
+    Grouped by weapon id, so a GM version in one activity and the regular version
+    in another make one alert that names both activities.
+    """
     labels = activity_labels(snapshot["activities"])
-    by_weapon = {}  # itemHash -> (weapon, [activity ids])
+    by_weapon = {}  # weapon id -> (weapon, [activity ids])
     for activity in snapshot["activities"]:
         for weapon in activity["weapons"]:
-            by_weapon.setdefault(weapon["itemHash"], (weapon, []))[1].append(activity["id"])
+            by_weapon.setdefault(weapon["id"], (weapon, []))[1].append(activity["id"])
 
     alerts = []
-    for item_hash, (weapon, activity_ids) in by_weapon.items():
+    for weapon_id, (weapon, activity_ids) in by_weapon.items():
         alerts.append({
-            "topic": weapon_topic(item_hash),
+            "topic": weapon_topic(weapon_id),
             "title": f"{weapon['name']} is a bonus drop today",
             "body": f"Bonus focus in {join_names([labels[i] for i in activity_ids])}",
             "image": weapon["icon"],
             # FCM data values must be strings. The app uses these to open the right screen (#9).
-            "data": {"kind": "weapon", "itemHash": str(item_hash), "activityIds": ",".join(activity_ids)},
+            "data": {"kind": "weapon", "weaponId": weapon_id, "activityIds": ",".join(activity_ids)},
         })
     return alerts
 

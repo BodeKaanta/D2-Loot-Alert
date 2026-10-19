@@ -7,7 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 const testTopic = 'test';
 
 /// Must match weapon_topic() / raid_topic() in backend/alerts.py.
-String weaponTopic(int itemHash) => 'weapon_$itemHash';
+String weaponTopic(String weaponId) => 'weapon_$weaponId'; // Weapon.id, the name slug (#26)
 String raidTopic(String id) => 'raid_$id'; // dungeons too
 
 /// Asks for permission to show notifications (Android 13+ and iOS ask the user).

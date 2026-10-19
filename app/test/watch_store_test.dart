@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:d2lootalert/models.dart';
 import 'package:d2lootalert/watch_store.dart';
@@ -31,7 +32,7 @@ class FakePush {
 }
 
 void main() {
-  const spareRations = Weapon(itemHash: 123, name: 'Spare Rations', type: 'Hand Cannon');
+  const spareRations = Weapon(id: 'spare-rations', itemHash: 123, name: 'Spare Rations', type: 'Hand Cannon');
   const lastWish = Featured(id: 'last-wish', name: 'Last Wish', kind: 'raid');
 
   late FakePush push;
@@ -51,10 +52,10 @@ void main() {
 
     expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.watching);
     await store.settled;
-    expect(push.topics, {'weapon_123'});
+    expect(push.topics, {'weapon_spare-rations'});
 
     final reopened = newStore(); // like reopening the app
-    expect(reopened.isWatchingWeapon(123), isTrue);
+    expect(reopened.isWatchingWeapon('spare-rations'), isTrue);
     expect(reopened.weapons.single.category, 'Gambit Ops');
   });
 
@@ -63,12 +64,12 @@ void main() {
     final store = newStore();
 
     expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.watching);
-    expect(store.isWatchingWeapon(123), isTrue); // already watching...
+    expect(store.isWatchingWeapon('spare-rations'), isTrue); // already watching...
     expect(push.topics, isEmpty); // ...while the subscribe is still in flight
 
     push.gate!.complete();
     await store.settled;
-    expect(push.topics, {'weapon_123'});
+    expect(push.topics, {'weapon_spare-rations'});
   });
 
   test('fast watch, unwatch, watch ends subscribed', () async {
@@ -81,8 +82,8 @@ void main() {
     push.gate!.complete();
     await store.settled;
 
-    expect(store.isWatchingWeapon(123), isTrue);
-    expect(push.topics, {'weapon_123'}); // topic changes ran in tap order
+    expect(store.isWatchingWeapon('spare-rations'), isTrue);
+    expect(push.topics, {'weapon_spare-rations'}); // topic changes ran in tap order
   });
 
   test('tapping again stops watching and unsubscribes', () async {
@@ -92,7 +93,7 @@ void main() {
     expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.stopped);
     await store.settled;
     expect(push.topics, isEmpty);
-    expect(newStore().isWatchingWeapon(123), isFalse);
+    expect(newStore().isWatchingWeapon('spare-rations'), isFalse);
   });
 
   test('raids use the raid_ topic', () async {
@@ -103,11 +104,29 @@ void main() {
     expect(store.isWatchingRaid('last-wish'), isTrue);
   });
 
+  test('weapon watches saved before #26 (no id) are dropped, raids are kept', () async {
+    SharedPreferences.setMockInitialValues({
+      'watches': jsonEncode({
+        'weapons': [
+          {'itemHash': 123, 'name': 'Spare Rations', 'type': 'Hand Cannon', 'category': 'Gambit Ops'},
+        ],
+        'raids': [
+          {'id': 'last-wish', 'name': 'Last Wish', 'kind': 'raid'},
+        ],
+      }),
+    });
+    prefs = await SharedPreferences.getInstance();
+
+    final store = newStore();
+    expect(store.weapons, isEmpty);
+    expect(store.isWatchingRaid('last-wish'), isTrue);
+  });
+
   test('nothing is saved without notification permission', () async {
     push.permission = false;
     final store = newStore();
     expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.noPermission);
-    expect(store.isWatchingWeapon(123), isFalse);
+    expect(store.isWatchingWeapon('spare-rations'), isFalse);
   });
 
   test('a failed subscribe is undone and reported', () async {
@@ -118,8 +137,8 @@ void main() {
     expect(await store.toggleWeapon(spareRations, 'Gambit Ops'), WatchResult.watching);
     await store.settled;
 
-    expect(store.isWatchingWeapon(123), isFalse); // rolled back
-    expect(newStore().isWatchingWeapon(123), isFalse); // and not saved as watched
+    expect(store.isWatchingWeapon('spare-rations'), isFalse); // rolled back
+    expect(newStore().isWatchingWeapon('spare-rations'), isFalse); // and not saved as watched
     expect(await failure, contains('Spare Rations'));
   });
 }

@@ -236,6 +236,13 @@ Other notes:
   - **Items stay single lookups** through the entity endpoint, because the item table is far bigger.
   - A full run with a loot-pool rebuild takes about 80 seconds, down from about 160.
 - **Item icons** are relative paths. Prefix them with `https://www.bungie.net`.
+- **One weapon can have several item hashes** (found in #26, 2026-10-18).
+  - The Warden of Nothing GM's reward list has 11 weapons twice (Adored, D.F.A., Lotus-Eater…):
+    - the **regular** version: in Collections, and also drops in Midtown, The Coil, the exotic missions…
+    - a **GM** version: not in Collections, drops fully masterworked ("Masterworked: Stability" instead of "Tier 1: Stability")
+  - The name, icon and type are identical.
+  - **The bonus focus can be either version.** On 2026-10-17, Warden of Nothing's focus was the GM Whatchamacallit (`149110926`), while Midtown's was the regular D.F.A. (`739029153`).
+  - So **weapons are identified by name, not hash.** Each weapon carries an `id`, the slug of its name, and watches and alerts use it.
 - **Rate limits:** a few requests per day are far below any limit.
 
 ## Architecture (planned)
@@ -331,8 +338,11 @@ Flutter app (Android + iOS)
   - An **activity group** has an `id` (e.g. `gambit-ops-gambit`), `name`, `category` (the in-game Portal category), `image` (a real banner when one exists), `activityHashes[]` and `weapons[]`.
     - The `id` is the slug of category + base name, so the Today screen's entries link to their loot pool by the same `id`.
     - `activities[]` is sorted in the game's Portal order (`CATEGORY_ORDER`: Solo, Fireteam, Arena, Pinnacle, Crucible, Gambit Ops), then anything else alphabetically, then by name. The app keeps that order.
-    - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool shape change. 2 = Portal categories (#8).
-  - A **weapon** has `itemHash`, `name`, `type` and `icon` (a full URL).
+    - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool shape change. 2 = Portal categories (#8), 3 = weapon `id`s (#26).
+  - A **weapon** has `id`, `itemHash`, `name`, `type` and `icon` (a full URL).
+    - `id` is the slug of the name, e.g. `d-f-a`. It's the same for every version of the weapon (see Bungie API notes > several item hashes).
+    - `itemHash` is one of its versions. Don't use it to identify the weapon.
+    - A group or pool lists each `id` once.
   - A **featured** entry has `id`, `name`, `kind` (`raid` or `dungeon`), `image` and `activityHashes[]`.
   - Only rotator-featured, farmable raids and dungeons appear (see Phase 0 findings). The newest raid and dungeon don't.
 
@@ -342,26 +352,27 @@ Flutter app (Android + iOS)
 
 - Built in #7: `backend/alerts.py` builds and sends the alerts, and `rotation.new_alerts()` decides which are new.
 - FCM **topics**, so the server never stores user data. The app subscribes when the user watches something:
-  - `weapon_<itemHash>`
+  - `weapon_<id>`, where `id` is the weapon's name slug, e.g. `weapon_whatchamacallit`. Slugs are used because one weapon can have several item hashes (#26); until #26 this was `weapon_<itemHash>`.
   - `raid_<id>`, where `id` is the featured entry's name slug, e.g. `raid_vow-of-the-disciple`. Dungeons use it too. Slugs are used because one raid has several activity hashes (Standard, Master).
 - **Weapon alert (daily):** one per weapon per reset, naming every activity where it's the focus.
   - **Title:** "Spare Rations is a bonus drop today"
   - **Body:** "Bonus focus in Gambit". Bode wants the body so people learn which activity a weapon comes from.
+  - **The alert must always say where to farm the weapon** (Bode, #26). Versions are merged by `id`, so a GM version in Warden of Nothing and the regular one in Midtown give one alert: "Bonus focus in Warden of Nothing and Midtown".
   - The category is added only when two categories share an activity name, e.g. "Quickplay (Solo Ops) and Quickplay (Vanguard Op)".
   - **Image:** the weapon icon.
 - **Raid/dungeon alert (weekly):** **title only**, e.g. "Vow of the Disciple is featured this week". Bode: players already know the weekly rotation lasts until Tuesday.
   - Only the farmable, rotator-featured ones are alerted. The newest raid and dungeon never are, because they're never "featured" in the farmable sense. (This replaced the earlier plan to alert them every Tuesday.)
 - **Data payload** (strings only), for tap-to-open in #9:
-  - weapons: `kind=weapon`, `itemHash`, `activityIds` (comma-separated group ids)
+  - weapons: `kind=weapon`, `weaponId`, `activityIds` (comma-separated group ids)
   - raids: `kind=raid|dungeon`, `id`
 - **Never twice:** `meta/state` stores `sentResetId` + `sentWeaponTopics` and `sentWeekId` + `sentRaidTopics`.
   - **Week ID** is the date of the most recent Tuesday 17:00 UTC reset.
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
 - **Images on iOS** need a Notification Service Extension in the app (#8). The backend already sets `mutable-content` and `fcm_options.image` on APNs. Android shows the image with no extra work.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
-- **Tests:** run `python -m unittest discover backend` from the repo root (19 tests, standard library only). They cover the reset and week math, alert wording, deduplication, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
+- **Tests:** run `python -m unittest discover backend` from the repo root (22 tests, standard library only). They cover the reset and week math, alert wording, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
-- **Watch types are simplified** to "weapon, in any activity" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
+- **Watch types are simplified** to "weapon, in any activity and any version" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
 ### App (Flutter)
 
@@ -392,11 +403,11 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Layout, like the game's Portal:** "BONUS FOCUS" with one section per Portal category (SOLO OPS, FIRETEAM OPS… GAMBIT OPS) via `groupByCategory()`, cards showing only the activity name. Every weapon row has a watch bell.
   - Then "FEATURED THIS WEEK" with RAIDS and DUNGEONS, **kept at the bottom** (Bode, 2026-10-17): daily content changes more often, and the RAIDS & DUNGEONS tab shows the featured ones first anyway.
 - **Loot:** WATCHING (every watched weapon, with its bell), then one banner card per Portal category with its weapon count. A card opens `CategoryScreen`: the category's whole pool, each weapon with a bell.
-  - `buildCategoryLoot()` merges the `lootPools` docs per category. The main pool is the weapon list most activities share. Weapons outside it are labeled "<activity> only" (e.g. Trials of Osiris, Sparrow Racing League, Warden of Nothing), which also covers Iron Banner or Trials-specific focus later.
+  - `buildCategoryLoot()` merges the `lootPools` docs per category, listing each weapon once by `id`, so it's watched from one row (#26). The main pool is the weapon list most activities share. Weapons outside it are labeled "<activity> only" (e.g. Trials of Osiris, Sparrow Racing League, Warden of Nothing), which also covers Iron Banner or Trials-specific focus later.
   - **Only the Portal categories are shown** (`portalCategories`, kept in sync with `CATEGORY_ORDER` in `rotation.py`). That hides the one-off Campaign, Story and World quest weapons (Bode).
 - **Raids & Dungeons:** FEATURED THIS WEEK (grid with bells), then ALL RAIDS and ALL DUNGEONS as slim banner rows with bells. These come from `rotation/current.raidsAndDungeons`; featured ones are labeled in gold.
 - **Watching** (`WatchStore`, a `ChangeNotifier` read through `WatchScope.of(context)`):
-  - **Watching = subscribing to the FCM topic** (`weapon_<itemHash>`, `raid_<id>`). FCM can't list a phone's topics, so the list is also saved locally with `shared_preferences` (key `watches`, JSON).
+  - **Watching = subscribing to the FCM topic** (`weapon_<id>`, `raid_<id>`). FCM can't list a phone's topics, so the list is also saved locally with `shared_preferences` (key `watches`, JSON).
   - **Taps are instant (#20).** A tap changes the list, every bell, and the confirmation message on the same frame, and saves without waiting.
     - The FCM subscribe or unsubscribe runs **in the background**, queued per topic, so fast repeated taps resolve in tap order.
     - **If it fails,** the change is undone (unless a later tap already reversed it) and a message goes out on `WatchStore.failures`. `main.dart` shows those through a global `ScaffoldMessenger` key, on whatever screen is open.
@@ -409,7 +420,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Judge smoothness in a release build** (`flutter run --release`). Debug builds scroll noticeably worse and aren't representative.
   - **Banners decode at their on-screen size** (`cacheWidth` in `BannerImage`, from `LayoutBuilder`) instead of Bungie's ~1920 px originals. `BoxFit.cover` on the taller grid cells is accounted for.
   - **No disk image cache.** Release scrolling was already smooth, so it wasn't worth a new package.
-- **Tests:** `flutter test` (14 tests: models, category loot, reset math, watch store) and `flutter analyze`, both clean as of #20.
+- **Tests:** `flutter test` (17 tests: models, category loot, reset math, watch store) and `flutter analyze`, both clean as of #26.
 
 ### Design system (agreed with Bode in #8)
 
@@ -484,7 +495,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #9 | Watch screens: browse loot pools and raids, toggle alerts | M | Done |
 | #21 | Bug: release build hung on splash (pin `shared_preferences_android` 2.4.28) | S | Done |
 | #20 | Performance: instant bell taps, banners decoded at display size | S | Done |
-| #24 | Update CLAUDE.md status for a new session | S | In progress |
+| #24 | Update CLAUDE.md status for a new session | S | Done |
+| #26 | Bug: duplicate weapon versions in Fireteam Ops, and missed alerts (weapons identified by name) | M | In progress |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
 | #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | S | Backlog |
@@ -502,7 +514,12 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-10-18, everything through #21 is merged into `main`, and `main` matches what's deployed.
+As of 2026-10-18, everything through #24 is merged into `main`, and `main` matches what's deployed.
+
+- **In progress: #26** (branch `task_26_weapon_variants`). Weapons get a name-based `id`, so each weapon's versions are watched and alerted as one weapon.
+  - **Deployed from the branch on 2026-10-19** for testing on the Pixel, so the backend is ahead of `main` until #26 merges.
+  - The backend and the app change together. After merging: deploy the backend, then Force run the scheduler job so the pools rebuild (`POOLS_SCHEMA` 3) and `rotation/current` gets the `id`s. Then install the new app.
+  - Old app builds stay subscribed to `weapon_<itemHash>` topics, which no longer get alerts.
 
 - **Backend:** the Cloud Function `daily_rotation` is deployed from `main`'s `backend/`. It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts.
 - **Android app:** works end to end on Bode's Pixel.
@@ -568,3 +585,7 @@ As of 2026-10-18, everything through #21 is merged into `main`, and `main` match
 - **2026-10-17:** Vendor weapon alerts are a later task (they need OAuth). Xûr's exotic armor alerts are task #13, after #7.
 - **2026-10-17:** Backend schedule: one run shortly after reset plus two backup runs, with alerts sent only once per reset.
 - **2026-10-17:** App registration and the APNs key moved from #5 to #8, where `flutterfire configure` handles registration.
+- **2026-10-18:** **Weapons are identified by name, not item hash** (#26).
+  - Bungie has several hashes for some weapons (the Warden of Nothing GM versions), and the bonus focus can be any of them.
+  - Watching a weapon covers every version, and LOOT lists each weapon once, with no layout change.
+  - Alerts still name every activity where the weapon is the focus (Bode).

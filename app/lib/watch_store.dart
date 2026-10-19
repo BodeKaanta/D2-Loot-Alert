@@ -18,6 +18,7 @@ class WatchedWeapon {
   final String category; // where the user found it, e.g. "Gambit Ops"
 
   Map<String, dynamic> toJson() => {
+        'id': weapon.id,
         'itemHash': weapon.itemHash,
         'name': weapon.name,
         'type': weapon.type,
@@ -33,7 +34,7 @@ class WatchedWeapon {
 
 /// Which weapons and raids/dungeons this phone gets alerts for.
 ///
-/// Watching means subscribing to the item's FCM topic (`weapon_<itemHash>` or
+/// Watching means subscribing to the item's FCM topic (`weapon_<id>` or
 /// `raid_<id>`). FCM can't tell an app which topics it's subscribed to, so the
 /// list is also saved on the phone with shared_preferences.
 ///
@@ -63,7 +64,7 @@ class WatchStore extends ChangeNotifier {
   final Future<bool> Function(String topic) _subscribe;
   final Future<bool> Function(String topic) _unsubscribe;
 
-  final Map<int, WatchedWeapon> _weapons = {};
+  final Map<String, WatchedWeapon> _weapons = {}; // by Weapon.id
   final Map<String, Featured> _raids = {};
 
   /// The last topic change queued for each topic. Changes to one topic run in
@@ -83,17 +84,17 @@ class WatchStore extends ChangeNotifier {
 
   List<WatchedWeapon> get weapons =>
       _weapons.values.toList()..sort((a, b) => a.weapon.name.compareTo(b.weapon.name));
-  bool isWatchingWeapon(int itemHash) => _weapons.containsKey(itemHash);
+  bool isWatchingWeapon(String id) => _weapons.containsKey(id);
   bool isWatchingRaid(String id) => _raids.containsKey(id);
 
   Future<WatchResult> toggleWeapon(Weapon weapon, String category) {
-    final hash = weapon.itemHash;
+    final id = weapon.id;
     return _toggle(
-      topic: push.weaponTopic(hash),
+      topic: push.weaponTopic(id),
       label: weapon.name,
-      isWatching: () => isWatchingWeapon(hash),
-      add: () => _weapons[hash] = WatchedWeapon(weapon: weapon, category: category),
-      remove: () => _weapons.remove(hash),
+      isWatching: () => isWatchingWeapon(id),
+      add: () => _weapons[id] = WatchedWeapon(weapon: weapon, category: category),
+      remove: () => _weapons.remove(id),
     );
   }
 
@@ -153,8 +154,12 @@ class WatchStore extends ChangeNotifier {
     try {
       final json = jsonDecode(saved) as Map<String, dynamic>;
       for (final w in (json['weapons'] as List? ?? const [])) {
-        final watched = WatchedWeapon.fromJson(Map<String, dynamic>.from(w as Map));
-        _weapons[watched.weapon.itemHash] = watched;
+        final map = Map<String, dynamic>.from(w as Map);
+        // Saved before #26, keyed by item hash. Those topics no longer get
+        // alerts, so drop them; the user re-taps the bells (Bode's choice).
+        if (map['id'] == null) continue;
+        final watched = WatchedWeapon.fromJson(map);
+        _weapons[watched.weapon.id] = watched;
       }
       for (final r in (json['raids'] as List? ?? const [])) {
         final raid = Featured.fromMap(Map<String, dynamic>.from(r as Map));
