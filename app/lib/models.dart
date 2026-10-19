@@ -6,14 +6,20 @@
 library;
 
 class Weapon {
-  const Weapon({required this.itemHash, required this.name, required this.type, this.icon});
+  const Weapon({required this.id, required this.itemHash, required this.name, required this.type, this.icon});
 
-  final int itemHash;
+  /// The slug of the name, e.g. "d-f-a". It's the same for every version of the
+  /// weapon (a GM version has its own [itemHash], #26), so watches and alert
+  /// topics use this, not the hash.
+  final String id;
+  final int itemHash; // one of its versions
   final String name;
   final String type; // e.g. "Hand Cannon"
   final String? icon; // full https URL on bungie.net
 
   factory Weapon.fromMap(Map<String, dynamic> map) => Weapon(
+        // Data written before #26 has no id; the hash still keeps weapons apart.
+        id: map['id'] as String? ?? '${map['itemHash'] ?? ''}',
         itemHash: (map['itemHash'] as num?)?.toInt() ?? 0,
         name: map['name'] as String? ?? 'Unknown weapon',
         type: map['type'] as String? ?? '',
@@ -145,19 +151,20 @@ List<CategoryLoot> buildCategoryLoot(List<LootPool> pools) {
     // Group activities by their exact weapon list; the main pool is the list most activities share.
     final byWeaponList = <String, List<LootPool>>{};
     for (final pool in inCategory) {
-      final key = (pool.weapons.map((w) => w.itemHash).toList()..sort()).join(',');
+      final key = (pool.weapons.map((w) => w.id).toList()..sort()).join(',');
       byWeaponList.putIfAbsent(key, () => []).add(pool);
     }
     final mainPools = byWeaponList.values.reduce((a, b) => a.length >= b.length ? a : b);
-    final mainHashes = {for (final w in mainPools.first.weapons) w.itemHash};
+    final mainIds = {for (final w in mainPools.first.weapons) w.id};
 
-    final weapons = <int, Weapon>{}; // each weapon once, by itemHash
-    final onlyIn = <int, Set<String>>{};
+    // Each weapon once, by id, so all its versions share one row and one bell.
+    final weapons = <String, Weapon>{};
+    final onlyIn = <String, Set<String>>{};
     for (final pool in inCategory) {
       for (final weapon in pool.weapons) {
-        weapons.putIfAbsent(weapon.itemHash, () => weapon);
-        if (!mainHashes.contains(weapon.itemHash)) {
-          onlyIn.putIfAbsent(weapon.itemHash, () => {}).add(pool.name);
+        weapons.putIfAbsent(weapon.id, () => weapon);
+        if (!mainIds.contains(weapon.id)) {
+          onlyIn.putIfAbsent(weapon.id, () => {}).add(pool.name);
         }
       }
     }
@@ -167,7 +174,7 @@ List<CategoryLoot> buildCategoryLoot(List<LootPool> pools) {
       image: mainPools.map((p) => p.image).firstWhere((i) => i != null, orElse: () => null),
       weapons: [
         for (final weapon in weapons.values)
-          LootWeapon(weapon: weapon, onlyIn: (onlyIn[weapon.itemHash]?.toList() ?? [])..sort()),
+          LootWeapon(weapon: weapon, onlyIn: (onlyIn[weapon.id]?.toList() ?? [])..sort()),
       ]..sort((a, b) => a.weapon.name.compareTo(b.weapon.name)),
     ));
   }

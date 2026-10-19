@@ -81,7 +81,7 @@ class WeaponBell extends StatelessWidget {
   Widget build(BuildContext context) {
     final watches = WatchScope.of(context);
     return WatchBell(
-      watching: watches.isWatchingWeapon(weapon.itemHash),
+      watching: watches.isWatchingWeapon(weapon.id),
       label: weapon.name,
       onToggle: () => watches.toggleWeapon(weapon, category),
     );

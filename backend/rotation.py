@@ -35,8 +35,9 @@ BUNGIE_URL = "https://www.bungie.net"   # icons and images are paths relative to
 CATEGORY_ORDER = ["Solo Ops", "Fireteam Ops", "Arena Ops", "Pinnacle Ops", "Crucible Ops", "Gambit Ops"]
 
 # Bump when the shape or IDs of lootPools documents change, to force a rebuild
-# even if Bungie's game data hasn't changed. 2 = in-game Portal categories (#8).
-POOLS_SCHEMA = 2
+# even if Bungie's game data hasn't changed. 2 = in-game Portal categories (#8),
+# 3 = weapon ids (#26).
+POOLS_SCHEMA = 3
 
 
 def reset_id(now):
@@ -91,13 +92,20 @@ def category_rank(category):
 
 
 def weapon_info(api, item_hash):
-    """What the app needs to show a weapon, or None if the item isn't a weapon."""
+    """What the app needs to show a weapon, or None if the item isn't a weapon.
+
+    The id comes from the name, not the hash: one weapon can have several item
+    hashes (e.g. Warden of Nothing's GM versions, #26), and any of them can be
+    the bonus focus. Watches and alert topics use the id, so they cover all of them.
+    """
     item = api.item(item_hash)
     if item.get("itemType") != WEAPON:
         return None
+    name = item["displayProperties"]["name"]
     return {
+        "id": slug(name) or str(item_hash),  # the hash only if the name has no letters or digits to slug
         "itemHash": item_hash,
-        "name": item["displayProperties"]["name"],
+        "name": name,
         "type": item.get("itemTypeDisplayName", ""),
         "icon": image_url(item["displayProperties"].get("icon")),
     }
@@ -139,7 +147,8 @@ def is_farmable(activity):
 
 
 def add_weapon(group, weapon):
-    if weapon and all(w["itemHash"] != weapon["itemHash"] for w in group["weapons"]):
+    """Adds the weapon unless the group already has it, in any version (same id)."""
+    if weapon and all(w["id"] != weapon["id"] for w in group["weapons"]):
         group["weapons"].append(weapon)
 
 
