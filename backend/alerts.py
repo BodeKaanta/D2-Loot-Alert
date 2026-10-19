@@ -43,6 +43,7 @@ def weapon_alerts(snapshot):
     in another make one alert that names both activities.
     """
     labels = activity_labels(snapshot["activities"])
+    banners = {a["id"]: a.get("image") for a in snapshot["activities"]}
     by_weapon = {}  # weapon id -> (weapon, [activity ids])
     for activity in snapshot["activities"]:
         for weapon in activity["weapons"]:
@@ -55,21 +56,40 @@ def weapon_alerts(snapshot):
             "title": f"{weapon['name']} is a bonus drop today",
             "body": f"Bonus focus in {join_names([labels[i] for i in activity_ids])}",
             "image": weapon["icon"],
-            # FCM data values must be strings. The app uses these to open the right screen (#9).
+            # Shown when the alert is expanded (#30): the first focus activity's banner
+            # that exists, else the weapon's own screenshot (e.g. Typhon Imperator has
+            # no banner). The body still names every activity.
+            "banner": next((banners[i] for i in activity_ids if banners[i]), weapon.get("screenshot")),
+            # The app uses these to open the right screen (#9).
             "data": {"kind": "weapon", "weaponId": weapon_id, "activityIds": ",".join(activity_ids)},
         })
     return alerts
 
 
 def raid_alerts(snapshot):
-    """One title-only alert per featured raid or dungeon. Players know it lasts until Tuesday."""
+    """One title-only alert per featured raid or dungeon. Players know it lasts until Tuesday.
+
+    Expanded, it shows the raid's banner (#30).
+    """
     return [{
         "topic": raid_topic(raid["id"]),
         "title": f"{raid['name']} is featured this week",
         "body": None,
         "image": None,
+        "banner": raid.get("image"),
         "data": {"kind": raid["kind"], "id": raid["id"]},
     } for raid in snapshot["featured"]]
+
+
+def fcm_data(alert):
+    """The alert's FCM data: what the app needs to open the right tab, plus what
+    it needs to draw the notification on Android (#30).
+
+    FCM data values must be strings, so empty ones (no body, no banner) are left out.
+    """
+    fields = {**alert["data"], "title": alert["title"], "body": alert["body"],
+              "icon": alert["image"], "banner": alert["banner"]}
+    return {key: str(value) for key, value in fields.items() if value is not None}
 
 
 def send(alerts):
@@ -88,18 +108,22 @@ def send(alerts):
         image = alert["image"]
         messages.append(messaging.Message(
             topic=alert["topic"],
-            notification=messaging.Notification(title=alert["title"], body=alert["body"], image=image),
-            data=alert["data"],
+            # No `notification` part: that makes it a data message on Android, so the
+            # app draws it, with the banner when expanded (#30). iPhones get the
+            # visible alert from the `apns` part below.
+            data=fcm_data(alert),
             # High priority so FCM delivers right away, even to a phone in Doze (#28).
-            # Otherwise it holds the alerts until the phone wakes, and since
-            # notification messages all share one collapse key, only the newest survives.
+            # Otherwise it holds alerts until the phone wakes.
             android=messaging.AndroidConfig(priority="high"),
-            # iOS only shows an image if the app has a Notification Service Extension (#8),
-            # and only runs that extension when mutable-content is set.
             apns=messaging.APNSConfig(
-                payload=messaging.APNSPayload(aps=messaging.Aps(mutable_content=True)),
-                fcm_options=messaging.APNSFCMOptions(image=image),
-            ) if image else None,
+                payload=messaging.APNSPayload(aps=messaging.Aps(
+                    alert=messaging.ApsAlert(title=alert["title"], body=alert["body"]),
+                    # iOS only shows an image if the app has a Notification Service
+                    # Extension (#17), and only runs it when mutable-content is set.
+                    mutable_content=bool(image),
+                )),
+                fcm_options=messaging.APNSFCMOptions(image=image) if image else None,
+            ),
         ))
 
     response = messaging.send_each(messages)
