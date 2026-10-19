@@ -369,6 +369,19 @@ Flutter app (Android + iOS)
   - **Week ID** is the date of the most recent Tuesday 17:00 UTC reset.
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
 - **Images on iOS** need a Notification Service Extension in the app (#8). The backend already sets `mutable-content` and `fcm_options.image` on APNs. Android shows the image with no extra work.
+- **Android priority is `high`** (#28). Without it, the 2026-10-18 alerts sat with FCM while the Pixel was in Doze. FCM accepted 12, but only one (Hammerhead) arrived, 50 minutes late, when the phone was picked up.
+  - **Notification messages are always collapsible** and share one default collapse key (the app's package name), so FCM keeps only the newest one it's holding for a device.
+  - High priority is delivered right away, even in Doze, so nothing waits to be collapsed. It's meant for messages that show a notification, which ours always do.
+  - **Known limit:** a phone that's fully offline at reset still gets only the newest alert when it reconnects. APNs works the same way on iOS. Avoiding that would need data messages plus local notifications in the app.
+- **Checking delivery on the Pixel** (no app logging needed):
+  - `adb shell dumpsys usagestats | grep d2lootalert` lists each `NOTIFICATION_INTERRUPTION` with the time it was posted.
+  - `adb shell dumpsys notification --noredact` shows `numPostedByApp`.
+- **Testing delivery to an idle phone without waiting for reset** (used for #28, from Git Bash with `MSYS_NO_PATHCONV=1`):
+  1. Watch a few of the current focus weapons while the phone is awake. Lock it and leave it plugged in.
+  2. **Bode** deletes `meta/state` in the Firebase console (Firestore → `meta` → `state` → ⋮ → Delete document), so the next run sends everything again. Claude's auto mode blocks this delete. The run rewrites the document, but it also rebuilds the pools and resends the week's raid alerts.
+  3. Force Doze: `adb shell dumpsys battery unplug`, then `adb shell dumpsys deviceidle force-idle`. Check that `adb shell dumpsys deviceidle get deep` says `IDLE`.
+  4. Force run the scheduler job. Then read the post times as above.
+  5. Undo: `adb shell dumpsys deviceidle unforce` and `adb shell dumpsys battery reset`.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
 - **Tests:** run `python -m unittest discover backend` from the repo root (22 tests, standard library only). They cover the reset and week math, alert wording, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
@@ -496,7 +509,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #21 | Bug: release build hung on splash (pin `shared_preferences_android` 2.4.28) | S | Done |
 | #20 | Performance: instant bell taps, banners decoded at display size | S | Done |
 | #24 | Update CLAUDE.md status for a new session | S | Done |
-| #26 | Bug: duplicate weapon versions in Fireteam Ops, and missed alerts (weapons identified by name) | M | In progress |
+| #26 | Bug: duplicate weapon versions in Fireteam Ops, and missed alerts (weapons identified by name) | M | Done |
+| #28 | Bug: alerts arrive late and several collapse into one (Android high priority) | S | In progress |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
 | #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | S | Backlog |
@@ -514,21 +528,25 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-10-18, everything through #24 is merged into `main`, and `main` matches what's deployed.
+As of 2026-10-19, everything through #26 is merged into `main`, and `main` matches what's deployed.
 
-- **In progress: #26** (branch `task_26_weapon_variants`). Weapons get a name-based `id`, so each weapon's versions are watched and alerted as one weapon.
-  - **Deployed from the branch on 2026-10-19** for testing on the Pixel, so the backend is ahead of `main` until #26 merges.
-  - The backend and the app change together. After merging: deploy the backend, then Force run the scheduler job so the pools rebuild (`POOLS_SCHEMA` 3) and `rotation/current` gets the `id`s. Then install the new app.
-  - Old app builds stay subscribed to `weapon_<itemHash>` topics, which no longer get alerts.
+- **In progress: #28** (branch `task_28_alert_priority`): high-priority alerts, so they arrive on time and don't collapse into one.
+  - **Deployed from the branch on 2026-10-19,** so the backend is ahead of `main` until #28 merges.
+  - **Tested 2026-10-19 with the Pixel in forced deep Doze** (Push notifications > Testing delivery to an idle phone).
+    - The run started at 06:44:15 UTC, and all 3 watched focus weapons were posted between 06:45:06 and 06:45:08, while the phone was still idle.
+    - On 2026-10-18 the same situation gave one alert, 50 minutes late.
 
 - **Backend:** the Cloud Function `daily_rotation` is deployed from `main`'s `backend/`. It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts.
 - **Android app:** works end to end on Bode's Pixel.
   - Today, Loot and Raids & Dungeons tabs, watch bells with instant taps, and the watch list.
   - Use **`flutter run --release`** to judge how it feels; debug builds are slower.
-- **Verified:** a manual test push via topic `test` reached the Pixel. Watching a weapon subscribes to its topic (checked on the emulator).
-- **Not verified yet** (first chance: the next 17:07 UTC run where something Bode watches comes up):
-  1. a real backend alert for a *watched* weapon or raid arriving on the Pixel
-  2. tapping that push opening the right tab (weapon → Today, raid → Raids & Dungeons)
+- **Verified:**
+  - A manual test push via topic `test` reached the Pixel.
+  - Watching a weapon subscribes to its topic (checked on the emulator).
+  - A real backend alert for a watched weapon reached the Pixel on 2026-10-18 (Hammerhead), but late and alone, which led to #28.
+  - With #28, every watched alert reaches an idle Pixel right away (forced-Doze test, 2026-10-19).
+- **Not verified yet:** tapping a push opening the right tab (weapon → Today, raid → Raids & Dungeons).
+  - Also watch a normal reset to confirm #28 outside the forced test.
   - Ask Bode how it went. If either fails, open a bug task.
 - **Next tasks, in suggested order:**
   1. **#17** iOS on Bode's Mac. It blocks the friend, the iOS tester. Start with CLAUDE.md > "App setup on a new machine".
@@ -589,3 +607,6 @@ As of 2026-10-18, everything through #24 is merged into `main`, and `main` match
   - Bungie has several hashes for some weapons (the Warden of Nothing GM versions), and the bonus focus can be any of them.
   - Watching a weapon covers every version, and LOOT lists each weapon once, with no layout change.
   - Alerts still name every activity where the weapon is the focus (Bode).
+- **2026-10-19:** **Alerts are sent with Android high priority** (#28).
+  - FCM held normal-priority alerts while the phone was in Doze and kept only the newest, since notification messages share one collapse key.
+  - Data messages with local notifications would also survive a fully offline phone, but need a new package. Skipped for now.
