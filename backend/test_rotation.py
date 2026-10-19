@@ -112,12 +112,76 @@ def previews(*item_hashes):
 
 
 class FakeItems:
-    """Stands in for the Bungie API's item lookups."""
-    def __init__(self, items):
+    """Stands in for the Bungie API: item lookups, plus the public vendors response for Xûr."""
+    def __init__(self, items, vendors=None):
         self.items = items
+        self.vendors = vendors
 
     def item(self, item_hash):
-        return self.items[item_hash]
+        return self.items.get(item_hash, {})
+
+    def request(self, path):
+        return self.vendors
+
+
+def exotic_armor(name, class_type, slot):
+    """An exotic armor item definition, as Bungie returns it."""
+    return {"itemType": rotation.ARMOR, "classType": class_type, "itemTypeDisplayName": slot,
+            "inventory": {"tierType": rotation.EXOTIC},
+            "displayProperties": {"name": name, "icon": f"/{name}.jpg"}, "screenshot": f"/{name}-shot.jpg"}
+
+
+OMNIOCULUS = {"id": "omnioculus", "name": "Omnioculus", "class": "Hunter", "slot": "Chest Armor",
+              "icon": "https://x/omni.jpg", "screenshot": "https://x/omni-shot.jpg"}
+
+
+class Xur(unittest.TestCase):
+    def test_stock_is_only_his_exotic_armor_in_class_order(self):
+        items = {
+            1: exotic_armor("Omnioculus", 1, "Chest Armor"),
+            2: exotic_armor("Peacekeepers", 0, "Leg Armor"),
+            3: {"itemType": 8, "inventory": {"tierType": rotation.EXOTIC},  # an engram: not armor
+                "displayProperties": {"name": "Exotic Engram"}},
+        }
+        vendors = {"vendors": {"data": {str(rotation.XUR): {"enabled": True}}},
+                   "sales": {"data": {str(rotation.XUR): {"saleItems": {
+                       "1": {"itemHash": 1}, "2": {"itemHash": 2}, "3": {"itemHash": 3}}}}}}
+        stock = rotation.xur_stock(FakeItems(items, vendors))
+        self.assertEqual([(a["name"], a["class"], a["slot"]) for a in stock],
+                         [("Peacekeepers", "Titan", "Leg Armor"), ("Omnioculus", "Hunter", "Chest Armor")])
+        self.assertEqual(stock[1]["screenshot"], "https://www.bungie.net/Omnioculus-shot.jpg")
+
+    def test_nothing_when_he_is_not_in_the_game(self):
+        self.assertEqual(rotation.xur_stock(FakeItems({}, {"vendors": {"data": {}}, "sales": {"data": {}}})), [])
+
+    def test_catalog_finds_collectibles_in_every_node_below_armor(self):
+        nodes = {str(rotation.EXOTIC_ARMOR_NODE): {"children": {"presentationNodes": [{"presentationNodeHash": 10}]}},
+                 "10": {"children": {"collectibles": [{"collectibleHash": 100}, {"collectibleHash": 101}]}}}
+        self.assertEqual(rotation.collectibles_under(nodes, rotation.EXOTIC_ARMOR_NODE), [100, 101])
+
+    def test_class_banners_use_the_chosen_exotic_else_the_first_chest_piece(self):
+        def piece(name, cls, slot):
+            return {"name": name, "class": cls, "slot": slot, "screenshot": f"https://x/{name}.jpg"}
+        armor = [piece("Actium War Rig", "Titan", "Chest Armor"), piece("Heart of Inmost Light", "Titan", "Chest Armor"),
+                 piece("Gwisin Vest", "Hunter", "Chest Armor")]  # The Sixth Coyote missing: fall back
+        self.assertEqual(rotation.class_images(armor), {"Titan": "https://x/Heart of Inmost Light.jpg",
+                                                        "Hunter": "https://x/Gwisin Vest.jpg"})
+
+    def test_alert_names_the_class_and_slot(self):
+        [alert] = alerts.xur_alerts({"xur": [OMNIOCULUS]})
+        self.assertEqual((alert["topic"], alert["title"], alert["body"], alert["banner"]),
+                         ("xur_omnioculus", "Xûr is selling Omnioculus", "Hunter chest armor", "https://x/omni-shot.jpg"))
+        self.assertEqual(alerts.armor_description({"class": "Titan", "slot": "Titan Mark"}), "Titan Mark")
+
+    def test_alerts_go_out_once_per_visit(self):
+        snapshot = {"resetId": "2026-10-19", "activities": [], "featured": [], "xur": [OMNIOCULUS]}
+        monday = utc(2026, 10, 19, 18, 7)  # his visit started Friday 2026-10-16, in the week of 2026-10-13
+
+        def topics(state):
+            to_send, _, _, _ = rotation.new_alerts(snapshot, state, monday)
+            return {a["topic"] for a in to_send}
+        self.assertEqual(topics({"sentWeekId": "2026-10-13", "sentXurTopics": ["xur_omnioculus"]}), set())
+        self.assertEqual(topics({"sentWeekId": "2026-10-06", "sentXurTopics": ["xur_omnioculus"]}), {"xur_omnioculus"})
 
 
 class WeaponIds(unittest.TestCase):
@@ -184,7 +248,7 @@ class NewAlerts(unittest.TestCase):
     now = utc(2026, 10, 17, 21, 7)  # a backup run on the same reset and week
 
     def topics(self, state):
-        to_send, _, _ = rotation.new_alerts(SNAPSHOT, state, self.now)
+        to_send, _, _, _ = rotation.new_alerts(SNAPSHOT, state, self.now)
         return {a["topic"] for a in to_send}
 
     def test_first_run_sends_everything(self):
