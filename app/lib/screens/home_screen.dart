@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
+import '../notifications.dart';
 import '../widgets/app_tab_bar.dart';
 import 'loot_screen.dart';
 import 'raids_screen.dart';
@@ -21,29 +22,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
   int _tab = _today;
   StreamSubscription<RemoteMessage>? _openedFromPush;
+  StreamSubscription<String?>? _openedFromAlert;
 
   @override
   void initState() {
     super.initState();
-    // A push tapped while the app was closed...
+    // Notifications FCM draws itself (iOS alerts, console tests), tapped while
+    // the app was closed...
     FirebaseMessaging.instance.getInitialMessage().then((message) {
-      if (message != null) _openTabFor(message);
+      if (message != null) _openTabFor(message.data['kind']);
     });
     // ...or while it was in the background.
-    _openedFromPush = FirebaseMessaging.onMessageOpenedApp.listen(_openTabFor);
+    _openedFromPush = FirebaseMessaging.onMessageOpenedApp.listen((message) => _openTabFor(message.data['kind']));
+
+    // Android alerts are drawn by the app (#30), so their taps come from notifications.dart.
+    launchedFromAlert().then(_openTabFor);
+    _openedFromAlert = alertTaps.listen(_openTabFor);
   }
 
   @override
   void dispose() {
     _openedFromPush?.cancel();
+    _openedFromAlert?.cancel();
     super.dispose();
   }
 
   /// Weapon alerts open Today (where the bonus focus is); raid and dungeon alerts
   /// open Raids & Dungeons. `kind` comes from the alert's data (backend/alerts.py).
-  void _openTabFor(RemoteMessage message) {
-    if (!mounted) return;
-    final tab = switch (message.data['kind']) {
+  void _openTabFor(String? kind) {
+    if (!mounted || kind == null) return;
+    final tab = switch (kind) {
       'weapon' => _today,
       'raid' || 'dungeon' => _raids,
       _ => _tab,
