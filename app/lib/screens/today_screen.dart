@@ -83,12 +83,12 @@ class _RotationList extends StatelessWidget {
         const _GroupTitle('Featured this week'),
         if (raids.isNotEmpty) ...[
           const SectionHeader('Raids'),
-          FeaturedGrid(featured: raids),
+          FeaturedGrid(featured: raids, showBells: true),
           const SizedBox(height: 20),
         ],
         if (dungeons.isNotEmpty) ...[
           const SectionHeader('Dungeons'),
-          FeaturedGrid(featured: dungeons),
+          FeaturedGrid(featured: dungeons, showBells: true),
         ],
       ],
     );
