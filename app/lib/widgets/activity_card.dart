@@ -46,20 +46,35 @@ class WeaponRow extends StatelessWidget {
   final Widget? trailing;
 
   @override
+  Widget build(BuildContext context) =>
+      ItemRow(icon: weapon.icon, name: weapon.name, subtitle: subtitle ?? weapon.type, trailing: trailing);
+}
+
+/// An item's icon tile, name and subtitle, with an optional widget on the right.
+/// Weapons and exotic armor (#13) share it so their rows look the same.
+class ItemRow extends StatelessWidget {
+  const ItemRow({super.key, required this.icon, required this.name, required this.subtitle, this.trailing});
+
+  final String? icon;
+  final String name;
+  final String subtitle;
+  final Widget? trailing;
+
+  @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
       child: Row(
         children: [
-          ItemTile(url: weapon.icon),
+          ItemTile(url: icon),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(weapon.name, style: AppText.itemName),
+                Text(name, style: AppText.itemName),
                 const SizedBox(height: 2),
-                Text(subtitle ?? weapon.type, style: AppText.itemType),
+                Text(subtitle, style: AppText.itemType),
               ],
             ),
           ),

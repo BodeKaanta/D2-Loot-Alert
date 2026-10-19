@@ -9,6 +9,7 @@ const testTopic = 'test';
 /// Must match weapon_topic() / raid_topic() in backend/alerts.py.
 String weaponTopic(String weaponId) => 'weapon_$weaponId'; // Weapon.id, the name slug (#26)
 String raidTopic(String id) => 'raid_$id'; // dungeons too
+String xurTopic(String armorId) => 'xur_$armorId'; // ExoticArmor.id, the name slug (#13)
 
 /// Asks for permission to show notifications (Android 13+ and iOS ask the user).
 /// Returns right away, without a prompt, once the user has answered.

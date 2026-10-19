@@ -161,6 +161,15 @@ No user accounts and no login. The README holds the public-facing scope.
 - **Xûr publicly shows exotic armor names only,** e.g. Omnioculus and Peacekeepers. He shows up while he's in the game (Friday to Tuesday reset).
   - No stats: the item stat components come back empty even when requested.
   - No exotic weapons: those sit behind his "Strange Gear Offers" sub-vendor, which the public endpoint doesn't return.
+- **Xûr in the backend** (#13, checked 2026-10-19):
+  - **Vendor hash** `2190858386`. His stock was 19 items. Keep `itemType == 2` (armor) with `inventory.tierType == 6` (exotic). That left **6 exotic armor pieces, 2 per class** (St0mp-EE5, Omnioculus, Peacekeepers, Wishful Ignorance, Promethium Spur, Mataiodoxía).
+  - The rest of his stock is engrams, materials, an emblem, a vehicle and the "Strange Offers" entries.
+  - **Full exotic armor list:** the game's Collections tree, `DestinyPresentationNodeDefinition` **`1789205056`** (Exotic > Armor), with Titan, Hunter and Warlock nodes below it. Their collectibles' `itemHash`es give **141 pieces, 47 per class**, including 3 exotic class items ("Titan Mark", "Hunter Cloak", "Warlock Bond").
+    - `DestinyPresentationNodeDefinition` (3 MB) and `DestinyCollectibleDefinition` (8 MB) download in about a second each.
+    - `DestinyInventoryItemLiteDefinition` is 61 MB, so items stay single lookups.
+  - Exotic armor has a `screenshot` (a 16:9 render), like weapons.
+  - The single-definition endpoint fails for some activity hashes (e.g. Prophecy, Vesper's Host, Last Wish) that the whole table has. Use the table.
+  - **Not checked yet:** what the endpoint returns after he leaves on Tuesday. The code treats "disabled" or "no sales" as absent. Check with a dry run after a Tuesday reset.
 
 ### Key data shapes
 
@@ -324,21 +333,26 @@ Flutter app (Android + iOS)
   - **"Failed to list functions" right after Firebase enables the Cloud Functions API** is a propagation delay. Wait a minute or two and retry.
   - **`firebase functions:secrets:set` can leave a secret with no value.** Check with `firebase functions:secrets:get <NAME>`, which should list an ENABLED version. To set one from `.env` without the prompt: `grep '^NAME=' phase0/.env | cut -d= -f2- | tr -d '\r\n' | firebase functions:secrets:set NAME --data-file -`.
   - **The first deploy configured the Artifact Registry cleanup policy** (delete images older than 1 day) by itself, so `functions:artifacts:setpolicy` wasn't needed.
+  - **A deploy can fail once in `loadCodebases`** (the CLI's local step that loads the Python function), with only a stack trace. It happened on 2026-10-19, and an immediate retry worked.
   - **When Claude deploys,** use `--non-interactive --force` because its shell can't answer prompts. `--force` only bypasses prompts here; there are no other functions it could delete.
 - **Idempotent:** each run for the same reset overwrites the same documents. **Reset ID** is the date of the most recent 17:00 UTC reset, e.g. `2026-10-17`.
 - **Firestore layout** (finalized in #6):
 
   | Path | Holds |
   |---|---|
-  | `rotation/current` | `resetId`, `updatedAt`, `activities[]`, `featured[]`, `raidsAndDungeons[]` (every farmable-capable raid and dungeon, same entry shape and IDs as `featured`; Pantheon and the newest raid and dungeon are left out) |
+  | `rotation/current` | `resetId`, `updatedAt`, `activities[]`, `featured[]`, `raidsAndDungeons[]` (every farmable-capable raid and dungeon, same entry shape and IDs as `featured`; Pantheon and the newest raid and dungeon are left out), `xur[]` (the exotic armor Xûr is selling, empty when he's not in the game, #13) |
+  | `catalog/exoticArmor` | `armor[]`: every exotic armor piece, for the app's Xûr screen, plus `xurImage` and `classImages` (the cards' banners) (#13). Rebuilt along with the loot pools; an empty build keeps the old list. |
   | `history/{resetId}` | a copy of each reset's last snapshot |
   | `lootPools/{id}` | one activity group's weapons, from its definitions' `rewards`. Rebuilt only when the manifest version or `POOLS_SCHEMA` (in `rotation.py`) changes; a rebuild also deletes pools whose IDs no longer exist. |
-  | `meta/state` | `manifestVersion`, `poolsSchema`, `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`) |
+  | `meta/state` | `manifestVersion`, `poolsSchema`, `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`, `sentXurTopics`) |
 
   - An **activity group** has an `id` (e.g. `gambit-ops-gambit`), `name`, `category` (the in-game Portal category), `image` (a real banner when one exists), `activityHashes[]` and `weapons[]`.
     - The `id` is the slug of category + base name, so the Today screen's entries link to their loot pool by the same `id`.
     - `activities[]` is sorted in the game's Portal order (`CATEGORY_ORDER`: Solo, Fireteam, Arena, Pinnacle, Crucible, Gambit Ops), then anything else alphabetically, then by name. The app keeps that order.
-    - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool shape change. 2 = Portal categories (#8), 3 = weapon `id`s (#26).
+    - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool or catalog shape change. 2 = Portal categories (#8), 3 = weapon `id`s (#26), 4 = exotic armor catalog (#13), 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13).
+  - An **exotic armor** entry has `id` (name slug), `itemHash`, `name`, `class` (Titan, Hunter or Warlock), `slot` (e.g. "Chest Armor") and `icon`.
+    - Xûr's stock also has `screenshot`, for the alert.
+    - Accented letters become hyphens in slugs: Mataiodoxía → `mataiodox-a`. It's consistent everywhere, so leave it; changing `slug()` would change existing topics.
   - A **weapon** has `id`, `itemHash`, `name`, `type`, `icon` (a full URL) and `screenshot` (a 16:9 render of the weapon, the fallback alert banner since #30).
     - `id` is the slug of the name, e.g. `d-f-a`. It's the same for every version of the weapon (see Bungie API notes > several item hashes).
     - `itemHash` is one of its versions. Don't use it to identify the weapon.
@@ -354,6 +368,7 @@ Flutter app (Android + iOS)
 - FCM **topics**, so the server never stores user data. The app subscribes when the user watches something:
   - `weapon_<id>`, where `id` is the weapon's name slug, e.g. `weapon_whatchamacallit`. Slugs are used because one weapon can have several item hashes (#26); until #26 this was `weapon_<itemHash>`.
   - `raid_<id>`, where `id` is the featured entry's name slug, e.g. `raid_vow-of-the-disciple`. Dungeons use it too. Slugs are used because one raid has several activity hashes (Standard, Master).
+  - `xur_<id>`, where `id` is the exotic armor's name slug, e.g. `xur_omnioculus` (#13).
 - **Weapon alert (daily):** one per weapon per reset, naming every activity where it's the focus.
   - **Title:** "Spare Rations is a bonus drop today"
   - **Body:** "Bonus focus in Gambit". Bode wants the body so people learn which activity a weapon comes from.
@@ -373,8 +388,16 @@ Flutter app (Android + iOS)
 - **Data payload** (strings only; empty fields are left out, see `fcm_data()`):
   - weapons: `kind=weapon`, `weaponId`, `activityIds` (comma-separated group ids)
   - raids: `kind=raid|dungeon`, `id`
+  - Xûr: `kind=xur`, `id`
   - for drawing (#30): `title`, `body`, `icon`, `banner`
-- **Never twice:** `meta/state` stores `sentResetId` + `sentWeaponTopics` and `sentWeekId` + `sentRaidTopics`.
+- **Xûr alert (weekly, #13):** one per exotic armor piece he's selling, once per visit.
+  - **Title:** "Xûr is selling Omnioculus"
+  - **Body:** "Hunter chest armor" (`armor_description()`), since exotic names don't say the class. Class items are just "Titan Mark".
+  - **Images:** the armor icon collapsed, the armor's screenshot expanded.
+  - **Tapping it** opens Today, where his stock is listed.
+  - A visit runs Friday reset to Tuesday reset, inside one week ID, so it shares `sentWeekId` with raids.
+  - **No stock** (he's gone, or the vendors call fails) means no Xûr alerts. The weapon and raid alerts still go out.
+- **Never twice:** `meta/state` stores `sentResetId` + `sentWeaponTopics` and `sentWeekId` + `sentRaidTopics` + `sentXurTopics`.
   - **Week ID** is the date of the most recent Tuesday 17:00 UTC reset.
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
 - **Images on iOS** need a Notification Service Extension in the app (#17). The backend already sets `mutable-content` and `fcm_options.image` on APNs.
@@ -394,9 +417,9 @@ Flutter app (Android + iOS)
   4. Force run the scheduler job. Then read the post times as above.
   5. Undo: `adb shell dumpsys deviceidle unforce` and `adb shell dumpsys battery reset`.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
-- **Tests:** run `python -m unittest discover backend` from the repo root (25 tests, standard library only). They cover the reset and week math, alert wording and data, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
+- **Tests:** run `python -m unittest discover backend` from the repo root (31 tests, standard library only). They cover the reset and week math, alert wording and data, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
-- **Watch types are simplified** to "weapon, in any activity and any version" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
+- **Watch types are simplified** to "weapon, in any activity and any version", "raid or dungeon", and "exotic armor Xûr sells" (#13). A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
 ### App (Flutter)
 
@@ -421,15 +444,28 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   | `push.dart` | Permission, topic subscribe and unsubscribe, `weaponTopic()` / `raidTopic()` (must match `backend/alerts.py`) |
   | `notifications.dart` | Draws Android alerts (#30): the background handler, foreground alerts, the "Bonus drops" channel, and alert taps |
   | `watch_store.dart` | The watch list (see Watching below), plus `WatchScope` |
-  | `screens/` | `home_screen` (tabs and push taps), `today_screen`, `loot_screen`, `category_screen`, `raids_screen`, `about_screen` |
-  | `widgets/` | Section header, banner image, activity card with `WeaponRow`/`WeaponBell`/`ItemTile`, featured grid and card with `RaidBell`, reset countdown, `WatchBell`, `AppTabBar`, `PageHeader` |
+  | `screens/` | `home_screen` (tabs and push taps), `today_screen`, `loot_screen`, `category_screen`, `xur_screen` (#13), `raids_screen`, `about_screen` |
+  | `widgets/` | Section header, banner image, activity card with `WeaponRow`/`WeaponBell`/`ItemRow`/`ItemTile`, featured grid and card with `RaidBell`, `ArmorRow`/`ArmorBell` (#13), `LinkCard` (banner card that opens a screen), reset countdown, `WatchBell`, `AppTabBar`, `PageHeader` |
 
 - **Tabs** (bottom, `AppTabBar`, **three equal thirds** so LOOT sits in the middle, as Bode asked): **TODAY / LOOT / RAIDS & DUNGEONS**. "RAIDS &" / "DUNGEONS" is stacked on two lines (Bode: it crowded the screen edge; stacking also keeps one text size on narrower iPhones). Every tab has the same two-line label area, so the underlines line up. The last name matches the game's wording (Bode). `IndexedStack` keeps each tab's scroll position.
 - **Today:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
   - **Layout, like the game's Portal:** "BONUS FOCUS" with one section per Portal category (SOLO OPS, FIRETEAM OPS… GAMBIT OPS) via `groupByCategory()`, cards showing only the activity name. Every weapon row has a watch bell.
   - Then "FEATURED THIS WEEK" with RAIDS and DUNGEONS, **kept at the bottom** (Bode, 2026-10-17): daily content changes more often, and the RAIDS & DUNGEONS tab shows the featured ones first anyway.
     - Their cards have watch bells too (#30). Bode: everything farmable right now should be watchable from Today.
-- **Loot:** WATCHING (every watched weapon, with its bell), then one banner card per Portal category with its weapon count. A card opens `CategoryScreen`: the category's whole pool, each weapon with a bell.
+    - **XÛR** comes after them, only while he's in the game (#13): his exotic armor, each row with its bell.
+- **Loot:** WATCHING (every watched weapon, then watched exotic armor, each with its bell), then one banner card per Portal category with its weapon count. A card opens `CategoryScreen`: the category's whole pool, each weapon with a bell.
+  - **After the categories, an XÛR card** (#13) opens `XurScreen`, which has one card per class: TITAN / HUNTER / WARLOCK, "47 exotics" each.
+    - A class card opens that class's exotics from `catalog/exoticArmor`, each with a bell.
+    - Bode asked for the extra step because all 141 pieces on one screen was too much to scroll.
+    - **Card art** (Bode asked):
+      - **XÛR card:** Xûr's vendor `locations[0].backgroundImagePath`, a 960×540 shot of him at his spot in the Tower. It's the vendor's own image, so it counts as content under the art rules.
+      - **Class cards:** Bungie has no class art (empty `DestinyClassDefinition` display properties, no icons on the Collections class nodes). So each card shows one exotic's screenshot: Heart of Inmost Light, The Sixth Coyote and Wings of Sacred Dawn (`CLASS_BANNER_ARMOR`, Bode's picks: all chest pieces). If one is missing, it falls back to the class's first chest piece. **Bump `POOLS_SCHEMA` after changing them.**
+      - **How a picture is framed in its card** is set in the app: `_classImageFraming` in `xur_screen.dart`, with an alignment and a zoom (`BannerImage.alignment` / `.zoom`).
+        - Bungie renders most chest pieces as torso close-ups, but robes (most Warlock chests) as full-body shots, so the same card shows a much smaller figure.
+        - Warlock (Wings of Sacred Dawn) is zoomed **1.8×** (shoulder widths compared with Heart of Inmost Light) around its chest gem, `Alignment(0.58, -0.6)`, so all three cards match (Bode).
+        - The XÛR card on LOOT uses `Alignment(0, -0.6)` in `loot_screen.dart`, so his head isn't cut off.
+      - Bode was offered the official class symbols (they're in the data, as Collections node icons) but kept the screenshots: the symbols are Bungie branding, which the art rules exclude.
+    - The cards are the shared `LinkCard` widget, the same as the category cards.
   - `buildCategoryLoot()` merges the `lootPools` docs per category, listing each weapon once by `id`, so it's watched from one row (#26). The main pool is the weapon list most activities share. Weapons outside it are labeled "<activity> only" (e.g. Trials of Osiris, Sparrow Racing League, Warden of Nothing), which also covers Iron Banner or Trials-specific focus later.
   - **Only the Portal categories are shown** (`portalCategories`, kept in sync with `CATEGORY_ORDER` in `rotation.py`). That hides the one-off Campaign, Story and World quest weapons (Bode).
 - **Raids & Dungeons:** FEATURED THIS WEEK (grid with bells), then ALL RAIDS and ALL DUNGEONS as slim banner rows with bells. These come from `rotation/current.raidsAndDungeons`; featured ones are labeled in gold.
@@ -441,7 +477,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **The first watch asks for notification permission.** That's the only time a tap waits; once granted, it isn't asked again in that session. If it's denied, nothing is watched.
   - **Firebase calls are injected,** so `test/watch_store_test.dart` runs with fakes, including a "slow network" gate to prove the bell updates before the network answers.
   - **A reinstall starts with an empty list** (a new install gets new FCM registrations anyway).
-- **Tapping a push** (`HomeScreen`) switches the tab by the alert's `kind`: `weapon` → Today, `raid`/`dungeon` → Raids & Dungeons.
+- **Tapping a push** (`HomeScreen`) switches the tab by the alert's `kind`: `weapon` and `xur` → Today, `raid`/`dungeon` → Raids & Dungeons.
   - **Android alerts** (drawn by the app, #30): `launchedFromAlert()` (app was closed) and `alertTaps` (app was running), both from `notifications.dart`.
   - **Notifications FCM draws itself** (iOS alerts, console test pushes): `getInitialMessage()` and `onMessageOpenedApp`.
 - **Alerts drawn by the app** (`notifications.dart`, #30):
@@ -455,7 +491,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Judge smoothness in a release build** (`flutter run --release`). Debug builds scroll noticeably worse and aren't representative.
   - **Banners decode at their on-screen size** (`cacheWidth` in `BannerImage`, from `LayoutBuilder`) instead of Bungie's ~1920 px originals. `BoxFit.cover` on the taller grid cells is accounted for.
   - **No disk image cache.** Release scrolling was already smooth, so it wasn't worth a new package.
-- **Tests:** `flutter test` (17 tests: models, category loot, reset math, watch store) and `flutter analyze`, both clean as of #26.
+- **Tests:** `flutter test` (19 tests: models, category loot, reset math, watch store) and `flutter analyze`, both clean as of #13.
 
 ### Design system (agreed with Bode in #8)
 
@@ -537,11 +573,11 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #24 | Update CLAUDE.md status for a new session | S | Done |
 | #26 | Bug: duplicate weapon versions in Fireteam Ops, and missed alerts (weapons identified by name) | M | Done |
 | #28 | Bug: alerts arrive late and several collapse into one (Android high priority) | S | Done |
-| #30 | Custom notifications on Android: weapon icon collapsed, activity banner expanded | M | In progress |
+| #30 | Custom notifications on Android: weapon icon collapsed, activity banner expanded | M | Done |
 | #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | Backlog |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
 | #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
-| #13 | Xûr alerts: exotic armor he's selling (names only, no login) | S | Backlog |
+| #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | In progress |
 | later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
 | later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
@@ -556,16 +592,18 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-10-19, everything through #28 is merged into `main`, and `main` matches what's deployed.
+As of 2026-10-19, everything through #30 is merged into `main`, and `main` matches what's deployed.
 
-- **In progress: #30** (branch `task_30_custom_notifications`): Android alerts drawn by the app, with the weapon icon collapsed and the activity banner expanded.
-  - Deploy the backend only together with the new app. Old app builds show nothing for data messages.
-  - **Deployed from the branch on 2026-10-19,** with the new release build on the Pixel, so the backend is ahead of `main` until #30 merges.
-  - **Tested 2026-10-19 with the forced-Doze recipe,** with the app's process stopped (`am kill`) so alerts start it from cold.
-    - 8 alerts were posted within 2 s, on the "Bonus drops" channel.
-    - Weapons: icon collapsed, banner expanded. Reckless Endangerment (Typhon Imperator) expands to its screenshot.
-    - Raids: banner as both the thumbnail and the expanded picture.
-    - Bode checked them on the phone.
+- **In progress: #13** (branch `task_13_xur_alerts`): Xûr's exotic armor.
+  - A full catalog of 141 pieces to watch on LOOT, his stock on TODAY, and an alert per watched piece he sells.
+  - Dry-run checked on 2026-10-19 against his live stock: 6 pieces, and the catalog built.
+  - **Deployed from the branch on 2026-10-19,** with the new release build on the Pixel, so the backend is ahead of `main` until #13 merges.
+  - **Checked on the Pixel on 2026-10-19:** Xûr alerts for belled pieces arrived. The XÛR screens, card art and TODAY section looked right (Bode).
+  - **Still to watch:** the first Friday arrival (17:07 UTC run) and what the vendors endpoint returns after he leaves on Tuesday.
+- **#30 was tested on 2026-10-19 with the forced-Doze recipe,** with the app's process stopped (`am kill`) so alerts start it from cold.
+  - 8 alerts were posted within 2 s, on the "Bonus drops" channel.
+  - Weapons: icon collapsed, banner expanded. Reckless Endangerment (Typhon Imperator) expands to its screenshot.
+  - Raids: banner as both the thumbnail and the expanded picture.
 - **#28 (high priority) was tested on 2026-10-19 with the Pixel in forced deep Doze** (Push notifications > Testing delivery to an idle phone).
   - The run started at 06:44:15 UTC, and all 3 watched focus weapons were posted between 06:45:06 and 06:45:08, while the phone was still idle.
   - On 2026-10-18 the same situation gave one alert, 50 minutes late.
@@ -580,12 +618,14 @@ As of 2026-10-19, everything through #28 is merged into `main`, and `main` match
   - A real backend alert for a watched weapon reached the Pixel on 2026-10-18 (Hammerhead), but late and alone, which led to #28.
   - With #28, every watched alert reaches an idle Pixel right away (forced-Doze test, 2026-10-19).
   - With #30, tapping an alert opens the right tab: weapon → Today, raid → Raids & Dungeons (Bode, 2026-10-19).
-- **Not verified yet:** a normal reset with #28 and #30, outside the forced test.
-  - Ask Bode how it went. If it fails, open a bug task.
+  - A normal reset with #28 and #30 (2026-10-19, 17:07 UTC): every alert looked right (Bode).
 - **Next tasks, in suggested order:**
-  1. **#17** iOS on Bode's Mac. It blocks the friend, the iOS tester. Start with CLAUDE.md > "App setup on a new machine".
-  2. **#10** release. It needs #17 and the friend's app icon (brief: "D2 Loot Alert – App Icon Brief", a Claude Doc Bode exported as PDF).
-  3. **#13** Xûr. Small, can slot in anywhere.
+  1. **#17** iOS on Bode's Mac. It blocks the friend, the iOS tester. Start with CLAUDE.md > "App setup on a new machine". Bode has no Mac at hand as of 2026-10-19.
+  2. **#31** the iOS version of the custom notifications, after #17.
+  3. **#10** release. It needs #17 and the friend's app icon (brief: "D2 Loot Alert – App Icon Brief", a Claude Doc Bode exported as PDF).
+  4. **Not created yet:** a WATCHING section at the top of Today's BONUS FOCUS, with copies of the activity cards whose weapon Bode watches (Bode's idea, 2026-10-19).
+     - Claude suggested: copy rather than move, show the category on each copy, hide the section when it's empty, and no list jump when a bell lower down is tapped.
+     - Open question for Bode: include watched featured raids and dungeons, which would put it above BONUS FOCUS?
 - **Keep an eye on:**
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
   - "Still open (minor)" above.
@@ -651,3 +691,12 @@ As of 2026-10-19, everything through #28 is merged into `main`, and `main` match
   - A weapon whose focus activities have no banner shows its own screenshot instead.
   - Today's featured raids and dungeons got watch bells in the same task (Bode).
   - The app has its own "Bonus drops" channel instead of FCM's "Misc".
+- **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
+  - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.
+  - **Topics** are `xur_<name slug>`, like weapons (#26 showed hashes aren't stable).
+  - **Alert:** "Xûr is selling Omnioculus" / "Hunter chest armor", with the screenshot when expanded, once per visit.
+  - **App:** an XÛR card on LOOT, his stock on TODAY under FEATURED THIS WEEK, and taps open Today.
+  - Sized up from S to M.
+  - The generic Raid symbol was rejected as a raid notification icon (#30): it's interface art.
+  - **XÛR on LOOT is two levels:** first a card per class, then that class's exotics (Bode: 141 on one screen was too much).
+  - **The cards have art:** Xûr's own vendor location image, and one exotic's screenshot per class, since Bungie has no class art.

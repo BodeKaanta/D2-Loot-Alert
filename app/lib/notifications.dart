@@ -84,8 +84,9 @@ Future<void> showAlert(RemoteMessage message) async {
   final icon = thumbnailBytes == null ? null : ByteArrayAndroidBitmap(thumbnailBytes);
 
   await _plugin.show(
-    // One notification per weapon or raid, so a repeat replaces it instead of stacking.
-    id: (data['weaponId'] ?? data['id'] ?? title).hashCode,
+    // One notification per weapon, raid or Xûr armor piece, so a repeat replaces
+    // it instead of stacking. The kind keeps a raid and an armor id apart.
+    id: '${data['kind']}:${data['weaponId'] ?? data['id'] ?? title}'.hashCode,
     title: title,
     body: data['body'],
     payload: data['kind'],

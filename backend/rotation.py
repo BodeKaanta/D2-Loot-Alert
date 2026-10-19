@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import alerts
-from bungie import Bungie
+from bungie import Bungie, BungieError
 from game_data import GameData, base_name
 
 BONUS_FOCUS = "daily_grind_guaranteed"  # uiStyle of a bonus focus reward
@@ -30,14 +30,27 @@ WEEKLY_REWARD = 3649567221              # the "Weekly Reward" preview item: loot
 RESET_HOUR_UTC = 17
 BUNGIE_URL = "https://www.bungie.net"   # icons and images are paths relative to this
 
+# Xûr (#13)
+XUR = 2190858386                        # DestinyVendorDefinition hash
+ARMOR = 2                               # DestinyItemType.Armor
+EXOTIC = 6                              # TierType.Exotic
+EXOTIC_ARMOR_NODE = 1789205056          # Collections > Exotic > Armor (Titan, Hunter, Warlock below it)
+CLASS_NAMES = {0: "Titan", 1: "Hunter", 2: "Warlock"}  # DestinyClass, in the game's order
+# Bungie has no class art we may use, so each class card on the Xûr screen shows
+# one well-known exotic's screenshot (Bode's picks, 2026-10-19). Bump POOLS_SCHEMA
+# after changing these, or the catalog keeps the old images until a game update.
+# Where each picture sits in its card is set in the app (_classImageAlignment in xur_screen.dart).
+CLASS_BANNER_ARMOR = {"Titan": "Heart of Inmost Light", "Hunter": "The Sixth Coyote", "Warlock": "Wings of Sacred Dawn"}
+
 # The order the app lists categories in: the game's own Portal list, then Gambit.
 # Anything else (e.g. an activity outside the Portal) comes after, alphabetically.
 CATEGORY_ORDER = ["Solo Ops", "Fireteam Ops", "Arena Ops", "Pinnacle Ops", "Crucible Ops", "Gambit Ops"]
 
-# Bump when the shape or IDs of lootPools documents change, to force a rebuild
-# even if Bungie's game data hasn't changed. 2 = in-game Portal categories (#8),
-# 3 = weapon ids (#26).
-POOLS_SCHEMA = 3
+# Bump when the shape or IDs of lootPools documents (or the exotic armor catalog)
+# change, to force a rebuild even if Bungie's game data hasn't changed.
+# 2 = in-game Portal categories (#8), 3 = weapon ids (#26), 4 = exotic armor catalog (#13),
+# 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13).
+POOLS_SCHEMA = 7
 
 
 def reset_id(now):
@@ -155,6 +168,53 @@ def add_weapon(group, weapon):
         group["weapons"].append(weapon)
 
 
+def armor_info(api, item_hash):
+    """What the app and alerts need for an exotic armor piece, or None if the item isn't one."""
+    item = api.item(item_hash)
+    if item.get("itemType") != ARMOR or item.get("inventory", {}).get("tierType") != EXOTIC:
+        return None
+    name = item["displayProperties"]["name"]
+    return {
+        "id": slug(name) or str(item_hash),  # by name, like weapons (#26)
+        "itemHash": item_hash,
+        "name": name,
+        "class": CLASS_NAMES.get(item.get("classType"), ""),
+        "slot": item.get("itemTypeDisplayName", ""),  # e.g. "Chest Armor"
+        "icon": image_url(item["displayProperties"].get("icon")),
+        "screenshot": image_url(item.get("screenshot")),  # the expanded alert's picture
+    }
+
+
+def by_class(armor):
+    """Sort key: the game's class order (Titan, Hunter, Warlock), then name."""
+    order = list(CLASS_NAMES.values())
+    return (order.index(armor["class"]) if armor["class"] in order else len(order), armor["name"])
+
+
+def xur_stock(api):
+    """The exotic armor Xûr is selling, or [] when he isn't in the game (Friday to Tuesday reset).
+
+    The public vendors endpoint shows names only: no stats, and no exotic weapons
+    (those are behind his "Strange Gear Offers", which needs a Bungie login). The
+    rest of his stock (engrams, materials...) is filtered out by armor_info().
+    """
+    try:
+        response = api.request("/Destiny2/Vendors/?components=400,402")
+    except BungieError as err:
+        print(f"Couldn't read Xûr's stock: {err}")  # weapon and raid alerts still go out
+        return []
+    vendor = response.get("vendors", {}).get("data", {}).get(str(XUR), {})
+    if not vendor.get("enabled", True):
+        return []
+    sales = response.get("sales", {}).get("data", {}).get(str(XUR), {}).get("saleItems", {})
+    stock = {}
+    for sale in sales.values():
+        armor = armor_info(api, sale.get("itemHash"))
+        if armor:
+            stock.setdefault(armor["id"], armor)
+    return sorted(stock.values(), key=by_class)
+
+
 def build_snapshot(api, data, profile, now):
     """Today's bonus focus weapons per activity, plus this week's featured raids and dungeons."""
     activities = {}
@@ -203,6 +263,7 @@ def build_snapshot(api, data, profile, now):
                              key=lambda a: (category_rank(a["category"]), a["category"], a["name"])),
         "featured": sorted(featured.values(), key=lambda f: (f["kind"], f["name"])),
         "raidsAndDungeons": build_raid_catalog(data, profile),  # everything the app can watch
+        "xur": xur_stock(api),  # the exotic armor he's selling; [] when he's not in the game
     }
 
 
@@ -258,16 +319,70 @@ def build_loot_pools(api, data, profile):
     return pools
 
 
-def new_alerts(snapshot, state, now):
-    """The alerts not already sent this reset (weapons) or this week (raids and dungeons).
+def collectibles_under(nodes, node_hash):
+    """Every collectible hash in a Collections node and the nodes below it."""
+    children = nodes.get(str(node_hash), {}).get("children", {})
+    found = [c["collectibleHash"] for c in children.get("collectibles", [])]
+    for child in children.get("presentationNodes", []):
+        found += collectibles_under(nodes, child["presentationNodeHash"])
+    return found
 
-    Returns (alerts to send, weapon topics already sent, raid topics already sent).
+
+def build_exotic_armor_catalog(api):
+    """Every exotic armor piece, for the app's Xûr screen, where people pick what to watch.
+
+    The list comes from the game's Collections (Exotic > Armor > Titan, Hunter,
+    Warlock): 141 pieces on 2026-10-19. One item lookup each, so run() only
+    rebuilds it along with the loot pools.
+
+    Returns {"armor": [...], "xurImage": ..., "classImages": {class: ...}}, the
+    catalog/exoticArmor document.
     """
+    nodes = api.definition_table("DestinyPresentationNodeDefinition")
+    collectibles = api.definition_table("DestinyCollectibleDefinition")
+    catalog = {}
+    for collectible_hash in collectibles_under(nodes, EXOTIC_ARMOR_NODE):
+        item_hash = collectibles.get(str(collectible_hash), {}).get("itemHash")
+        armor = armor_info(api, item_hash) if item_hash else None
+        if armor:
+            catalog.setdefault(armor["id"], armor)
+    armor = sorted(catalog.values(), key=by_class)
+
+    # The XÛR card on LOOT: the image of Xûr at his spot in the Tower.
+    locations = api.definition("DestinyVendorDefinition", XUR).get("locations", [])
+    xur_image = image_url(locations[0].get("backgroundImagePath")) if locations else None
+    return {"armor": [{k: v for k, v in a.items() if k != "screenshot"} for a in armor],  # alerts look it up fresh
+            "xurImage": xur_image,
+            "classImages": class_images(armor)}
+
+
+def class_images(armor):
+    """Each class card's banner: CLASS_BANNER_ARMOR's screenshot, else the class's first chest piece."""
+    images = {}
+    for cls, name in CLASS_BANNER_ARMOR.items():
+        mine = [a for a in armor if a["class"] == cls and a["screenshot"]]
+        pick = (next((a for a in mine if a["name"] == name), None)
+                or next((a for a in mine if a["slot"] == "Chest Armor"), None))
+        if pick:
+            images[cls] = pick["screenshot"]
+    return images
+
+
+def new_alerts(snapshot, state, now):
+    """The alerts not already sent this reset (weapons) or this week (raids, dungeons and Xûr).
+
+    Returns (alerts to send, weapon topics already sent, raid topics already sent,
+    Xûr topics already sent).
+    """
+    this_week = state.get("sentWeekId") == week_id(now)
     sent_weapons = set(state.get("sentWeaponTopics", [])) if state.get("sentResetId") == snapshot["resetId"] else set()
-    sent_raids = set(state.get("sentRaidTopics", [])) if state.get("sentWeekId") == week_id(now) else set()
+    sent_raids = set(state.get("sentRaidTopics", [])) if this_week else set()
+    # Xûr arrives Friday and leaves at the Tuesday reset, so one visit is one week.
+    sent_xur = set(state.get("sentXurTopics", [])) if this_week else set()
     to_send = ([a for a in alerts.weapon_alerts(snapshot) if a["topic"] not in sent_weapons]
-               + [a for a in alerts.raid_alerts(snapshot) if a["topic"] not in sent_raids])
-    return to_send, sent_weapons, sent_raids
+               + [a for a in alerts.raid_alerts(snapshot) if a["topic"] not in sent_raids]
+               + [a for a in alerts.xur_alerts(snapshot) if a["topic"] not in sent_xur])
+    return to_send, sent_weapons, sent_raids, sent_xur
 
 
 def save_loot_pools(db, pools):
@@ -279,6 +394,18 @@ def save_loot_pools(db, pools):
         if old.id not in pools:
             batch.delete(old)
     batch.commit()
+
+
+def save_exotic_armor_catalog(db, catalog):
+    """One document for the whole list (141 small entries, far under Firestore's 1 MB limit).
+
+    An empty list means the Collections node moved in a game update, so the old
+    list is kept rather than wiped.
+    """
+    if not catalog["armor"]:
+        print("Exotic armor catalog came back empty; keeping the old one (check EXOTIC_ARMOR_NODE)")
+        return
+    db.document("catalog/exoticArmor").set(catalog)
 
 
 def run(api_key, bungie_name, db):
@@ -293,23 +420,25 @@ def run(api_key, bungie_name, db):
     data = GameData.download(api)
     snapshot = build_snapshot(api, data, profile, now)
     print(f"Reset {snapshot['resetId']}: {len(snapshot['activities'])} activities with a weapon focus, "
-          f"{len(snapshot['featured'])} featured raids/dungeons")
+          f"{len(snapshot['featured'])} featured raids/dungeons, {len(snapshot['xur'])} Xûr exotic armor")
 
     db.document("rotation/current").set(snapshot)
     db.document(f"history/{snapshot['resetId']}").set(snapshot)
 
-    # Loot pools only change when Bungie updates the game data (manifest) or we
-    # change their format, and rebuilding them takes a few hundred item lookups,
-    # so skip it otherwise.
+    # Loot pools and the exotic armor catalog only change when Bungie updates the
+    # game data (manifest) or we change their format, and rebuilding them takes a
+    # few hundred item lookups, so skip it otherwise.
     state_ref = db.document("meta/state")
     state = state_ref.get().to_dict() or {}
     manifest_version = api.manifest_version()
     if state.get("manifestVersion") != manifest_version or state.get("poolsSchema") != POOLS_SCHEMA:
         pools = build_loot_pools(api, data, profile)
         save_loot_pools(db, pools)
-        print(f"Rebuilt {len(pools)} loot pools for manifest {manifest_version}")
+        catalog = build_exotic_armor_catalog(api)
+        save_exotic_armor_catalog(db, catalog)
+        print(f"Rebuilt {len(pools)} loot pools and {len(catalog['armor'])} exotic armor for manifest {manifest_version}")
 
-    to_send, sent_weapons, sent_raids = new_alerts(snapshot, state, now)
+    to_send, sent_weapons, sent_raids, sent_xur = new_alerts(snapshot, state, now)
     accepted = alerts.send(to_send)
     print(f"Sent {len(accepted)} of {len(to_send)} new alerts")
 
@@ -323,6 +452,7 @@ def run(api_key, bungie_name, db):
         "sentWeaponTopics": sorted(sent_weapons | {t for t in accepted if t.startswith("weapon_")}),
         "sentWeekId": week_id(now),
         "sentRaidTopics": sorted(sent_raids | {t for t in accepted if t.startswith("raid_")}),
+        "sentXurTopics": sorted(sent_xur | {t for t in accepted if t.startswith("xur_")}),
     }, merge=True)
 
 
@@ -340,8 +470,10 @@ def dry_run():
         print(f"  {a['category']:13} {a['name']:24} {', '.join(w['name'] for w in a['weapons']):26} {image}")
     print("Featured: " + ", ".join(f"{f['name']} ({f['kind']})" for f in snapshot["featured"]))
     print("Watchable raids/dungeons: " + ", ".join(r["name"] for r in snapshot["raidsAndDungeons"]))
+    print("Xûr is selling: " + (", ".join(f"{a['name']} ({a['class']} {a['slot']})" for a in snapshot["xur"])
+                                or "nothing (not in the game)"))
 
-    to_send, _, _ = new_alerts(snapshot, {}, now)  # empty state: as if nothing was sent yet
+    to_send, _, _, _ = new_alerts(snapshot, {}, now)  # empty state: as if nothing was sent yet
     print(f"Alerts that would be sent ({len(to_send)}):")
     for alert in to_send:
         print(f"  [{alert['topic']}] {alert['title']}" + (f" / {alert['body']}" if alert["body"] else ""))
@@ -356,6 +488,9 @@ def dry_run():
         pools = build_loot_pools(api, data, profile)
         print(f"{len(pools)} loot pools")
         (out / "loot_pools.json").write_text(json.dumps(pools, indent=2, ensure_ascii=False), encoding="utf-8")
+        catalog = build_exotic_armor_catalog(api)
+        print(f"{len(catalog['armor'])} exotic armor in the catalog; banners: {catalog['classImages']}, Xûr: {catalog['xurImage']}")
+        (out / "exotic_armor.json").write_text(json.dumps(catalog, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Saved to {out}")
 
 

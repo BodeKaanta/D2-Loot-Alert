@@ -104,6 +104,19 @@ void main() {
     expect(store.isWatchingRaid('last-wish'), isTrue);
   });
 
+  test('exotic armor uses the xur_ topic and survives a restart (#13)', () async {
+    const omnioculus =
+        ExoticArmor(id: 'omnioculus', name: 'Omnioculus', guardianClass: 'Hunter', slot: 'Chest Armor');
+    final store = newStore();
+    await store.toggleArmor(omnioculus);
+    await store.settled;
+    expect(push.topics, {'xur_omnioculus'});
+
+    final reopened = newStore();
+    expect(reopened.isWatchingArmor('omnioculus'), isTrue);
+    expect(reopened.armor.single.description, 'Hunter chest armor');
+  });
+
   test('weapon watches saved before #26 (no id) are dropped, raids are kept', () async {
     SharedPreferences.setMockInitialValues({
       'watches': jsonEncode({

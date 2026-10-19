@@ -34,8 +34,8 @@ class WatchedWeapon {
 
 /// Which weapons and raids/dungeons this phone gets alerts for.
 ///
-/// Watching means subscribing to the item's FCM topic (`weapon_<id>` or
-/// `raid_<id>`). FCM can't tell an app which topics it's subscribed to, so the
+/// Watching means subscribing to the item's FCM topic (`weapon_<id>`,
+/// `raid_<id>` or `xur_<id>`). FCM can't tell an app which topics it's subscribed to, so the
 /// list is also saved on the phone with shared_preferences.
 ///
 /// Taps feel instant: the list (and every bell showing it) changes right away,
@@ -66,6 +66,7 @@ class WatchStore extends ChangeNotifier {
 
   final Map<String, WatchedWeapon> _weapons = {}; // by Weapon.id
   final Map<String, Featured> _raids = {};
+  final Map<String, ExoticArmor> _armor = {}; // by ExoticArmor.id (#13)
 
   /// The last topic change queued for each topic. Changes to one topic run in
   /// tap order, so watch-unwatch-watch ends subscribed, however fast the taps.
@@ -84,8 +85,10 @@ class WatchStore extends ChangeNotifier {
 
   List<WatchedWeapon> get weapons =>
       _weapons.values.toList()..sort((a, b) => a.weapon.name.compareTo(b.weapon.name));
+  List<ExoticArmor> get armor => _armor.values.toList()..sort((a, b) => a.name.compareTo(b.name));
   bool isWatchingWeapon(String id) => _weapons.containsKey(id);
   bool isWatchingRaid(String id) => _raids.containsKey(id);
+  bool isWatchingArmor(String id) => _armor.containsKey(id);
 
   Future<WatchResult> toggleWeapon(Weapon weapon, String category) {
     final id = weapon.id;
@@ -104,6 +107,15 @@ class WatchStore extends ChangeNotifier {
         isWatching: () => isWatchingRaid(raid.id),
         add: () => _raids[raid.id] = raid,
         remove: () => _raids.remove(raid.id),
+      );
+
+  /// Exotic armor: a push when Xûr is selling it (#13).
+  Future<WatchResult> toggleArmor(ExoticArmor armor) => _toggle(
+        topic: push.xurTopic(armor.id),
+        label: armor.name,
+        isWatching: () => isWatchingArmor(armor.id),
+        add: () => _armor[armor.id] = armor,
+        remove: () => _armor.remove(armor.id),
       );
 
   Future<WatchResult> _toggle({
@@ -165,6 +177,10 @@ class WatchStore extends ChangeNotifier {
         final raid = Featured.fromMap(Map<String, dynamic>.from(r as Map));
         _raids[raid.id] = raid;
       }
+      for (final a in (json['armor'] as List? ?? const [])) {
+        final armor = ExoticArmor.fromMap(Map<String, dynamic>.from(a as Map));
+        _armor[armor.id] = armor;
+      }
     } catch (_) {
       // A damaged save shouldn't crash the app; it just starts with an empty list.
     }
@@ -175,6 +191,7 @@ class WatchStore extends ChangeNotifier {
         'raids': [
           for (final r in _raids.values) {'id': r.id, 'name': r.name, 'kind': r.kind, 'image': r.image},
         ],
+        'armor': [for (final a in _armor.values) a.toMap()],
       }));
 
   @override

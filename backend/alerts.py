@@ -1,8 +1,8 @@
-"""Push alerts (issue #7): one FCM topic message per bonus focus weapon (daily)
-and per featured raid or dungeon (weekly).
+"""Push alerts (issue #7): one FCM topic message per bonus focus weapon (daily),
+per featured raid or dungeon (weekly) and per exotic armor Xûr sells (weekly, #13).
 
 Phones subscribe to a topic when the user watches something (weapon_<id>,
-raid_<id>), so the backend never stores who is watching what. rotation.run()
+raid_<id>, xur_<id>), so the backend never stores who is watching what. rotation.run()
 decides which alerts are new; this module only builds and sends them.
 """
 
@@ -13,6 +13,10 @@ def weapon_topic(weapon_id):
 
 def raid_topic(raid_id):
     return f"raid_{raid_id}"  # dungeons too
+
+
+def xur_topic(armor_id):
+    return f"xur_{armor_id}"  # the armor's name slug, like weapons (#13)
 
 
 def join_names(names):
@@ -79,6 +83,29 @@ def raid_alerts(snapshot):
         "banner": raid.get("image"),
         "data": {"kind": raid["kind"], "id": raid["id"]},
     } for raid in snapshot["featured"]]
+
+
+def armor_description(armor):
+    """'Hunter chest armor': exotic names don't say which class they're for.
+
+    Class items already include the class ('Titan Mark'), so those stay as they are.
+    """
+    cls, slot = armor["class"], armor["slot"]
+    if not cls or slot.startswith(cls):
+        return slot
+    return f"{cls} {slot.lower()}"
+
+
+def xur_alerts(snapshot):
+    """One alert per exotic armor piece Xûr is selling (#13). Expanded, it shows the armor's screenshot."""
+    return [{
+        "topic": xur_topic(armor["id"]),
+        "title": f"Xûr is selling {armor['name']}",
+        "body": armor_description(armor),
+        "image": armor["icon"],
+        "banner": armor.get("screenshot"),
+        "data": {"kind": "xur", "id": armor["id"]},
+    } for armor in snapshot.get("xur", [])]
 
 
 def fcm_data(alert):
