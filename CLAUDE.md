@@ -339,7 +339,7 @@ Flutter app (Android + iOS)
     - The `id` is the slug of category + base name, so the Today screen's entries link to their loot pool by the same `id`.
     - `activities[]` is sorted in the game's Portal order (`CATEGORY_ORDER`: Solo, Fireteam, Arena, Pinnacle, Crucible, Gambit Ops), then anything else alphabetically, then by name. The app keeps that order.
     - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool shape change. 2 = Portal categories (#8), 3 = weapon `id`s (#26).
-  - A **weapon** has `id`, `itemHash`, `name`, `type` and `icon` (a full URL).
+  - A **weapon** has `id`, `itemHash`, `name`, `type`, `icon` (a full URL) and `screenshot` (a 16:9 render of the weapon, the fallback alert banner since #30).
     - `id` is the slug of the name, e.g. `d-f-a`. It's the same for every version of the weapon (see Bungie API notes > several item hashes).
     - `itemHash` is one of its versions. Don't use it to identify the weapon.
     - A group or pool lists each `id` once.
@@ -359,20 +359,31 @@ Flutter app (Android + iOS)
   - **Body:** "Bonus focus in Gambit". Bode wants the body so people learn which activity a weapon comes from.
   - **The alert must always say where to farm the weapon** (Bode, #26). Versions are merged by `id`, so a GM version in Warden of Nothing and the regular one in Midtown give one alert: "Bonus focus in Warden of Nothing and Midtown".
   - The category is added only when two categories share an activity name, e.g. "Quickplay (Solo Ops) and Quickplay (Vanguard Op)".
-  - **Image:** the weapon icon.
+  - **Images** (#30, Android): the weapon icon as the thumbnail when collapsed, and the **activity's banner when expanded**.
+    - The banner comes from the first focus activity that has one.
+    - If no focus activity has a banner (e.g. Typhon Imperator), it uses the **weapon's screenshot** instead, so every weapon alert expands.
 - **Raid/dungeon alert (weekly):** **title only**, e.g. "Vow of the Disciple is featured this week". Bode: players already know the weekly rotation lasts until Tuesday.
   - Only the farmable, rotator-featured ones are alerted. The newest raid and dungeon never are, because they're never "featured" in the farmable sense. (This replaced the earlier plan to alert them every Tuesday.)
-- **Data payload** (strings only), for tap-to-open in #9:
+  - Expanded, it shows the raid's banner (#30). Collapsed, the banner doubles as the thumbnail, since raids and dungeons have no icon.
+  - **Not the generic Raid symbol.** Raid definitions do carry one, a small white glyph, but it's Bungie interface art, which the art rules exclude. It also disappears on a light background, and dungeons don't have one.
+- **How alerts reach the phone** (#30):
+  - **Android gets data messages** (no `notification` part), and the app draws them with `flutter_local_notifications`. FCM's own notifications have one `image`, which it uses both collapsed and expanded, so they can't show two pictures.
+  - **iPhones get a normal alert** from the message's `apns` part (`aps.alert`). #31 adds the banner on iOS.
+  - **App builds from before #30 show nothing on Android,** since they don't draw data messages. Install the new app before or with deploying #30's backend.
+- **Data payload** (strings only; empty fields are left out, see `fcm_data()`):
   - weapons: `kind=weapon`, `weaponId`, `activityIds` (comma-separated group ids)
   - raids: `kind=raid|dungeon`, `id`
+  - for drawing (#30): `title`, `body`, `icon`, `banner`
 - **Never twice:** `meta/state` stores `sentResetId` + `sentWeaponTopics` and `sentWeekId` + `sentRaidTopics`.
   - **Week ID** is the date of the most recent Tuesday 17:00 UTC reset.
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
-- **Images on iOS** need a Notification Service Extension in the app (#8). The backend already sets `mutable-content` and `fcm_options.image` on APNs. Android shows the image with no extra work.
+- **Images on iOS** need a Notification Service Extension in the app (#17). The backend already sets `mutable-content` and `fcm_options.image` on APNs.
 - **Android priority is `high`** (#28). Without it, the 2026-10-18 alerts sat with FCM while the Pixel was in Doze. FCM accepted 12, but only one (Hammerhead) arrived, 50 minutes late, when the phone was picked up.
   - **Notification messages are always collapsible** and share one default collapse key (the app's package name), so FCM keeps only the newest one it's holding for a device.
   - High priority is delivered right away, even in Doze, so nothing waits to be collapsed. It's meant for messages that show a notification, which ours always do.
-  - **Known limit:** a phone that's fully offline at reset still gets only the newest alert when it reconnects. APNs works the same way on iOS. Avoiding that would need data messages plus local notifications in the app.
+  - Since #30, Android gets data messages, which aren't collapsible. A phone that's fully offline at reset gets every alert when it reconnects. FCM stores up to 100 per device.
+  - High priority still matters: normal-priority data messages also wait out Doze.
+  - **Known limit on iOS:** APNs stores only the newest notification for a device that's offline.
 - **Checking delivery on the Pixel** (no app logging needed):
   - `adb shell dumpsys usagestats | grep d2lootalert` lists each `NOTIFICATION_INTERRUPTION` with the time it was posted.
   - `adb shell dumpsys notification --noredact` shows `numPostedByApp`.
@@ -383,7 +394,7 @@ Flutter app (Android + iOS)
   4. Force run the scheduler job. Then read the post times as above.
   5. Undo: `adb shell dumpsys deviceidle unforce` and `adb shell dumpsys battery reset`.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
-- **Tests:** run `python -m unittest discover backend` from the repo root (22 tests, standard library only). They cover the reset and week math, alert wording, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
+- **Tests:** run `python -m unittest discover backend` from the repo root (25 tests, standard library only). They cover the reset and week math, alert wording and data, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
 - **Watch types are simplified** to "weapon, in any activity and any version" plus "raid or dungeon." A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
@@ -391,7 +402,8 @@ Flutter app (Android + iOS)
 
 Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, and the app ID is `com.id0.d2lootalert` on both platforms. The display name is "D2 Loot Alert".
 
-- **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17, `shared_preferences` ^2.5 (added in #9 for the watch list).
+- **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17, `shared_preferences` ^2.5 (added in #9 for the watch list), `flutter_local_notifications` ^22.3.2 (added in #30 to draw Android alerts).
+  - `flutter_local_notifications` needs core library desugaring in `android/app/build.gradle.kts` (`isCoreLibraryDesugaringEnabled` plus `desugar_jdk_libs` 2.1.4).
   - `getToken()` is deprecated in `firebase_messaging` 17 (replaced by `register()`/`onRegistered`). We don't need tokens, only topics.
   - **Pinned: `shared_preferences_android` 2.4.28** (`dependency_overrides` in `pubspec.yaml`, #21).
     - 2.5.0 (released 2026-10-17) switched to a "Pigeon JNI" bridge that release-build code shrinking (R8) breaks. The app hung on the splash screen with `NoSuchMethodError ... SharedPreferencesApiRegistrar.getAll`, while debug builds worked.
@@ -407,6 +419,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   | `models.dart` | Defensive parsing of the Firestore docs; `groupByCategory()`; `buildCategoryLoot()`; `portalCategories` |
   | `reset.dart` | Next daily reset and countdown text |
   | `push.dart` | Permission, topic subscribe and unsubscribe, `weaponTopic()` / `raidTopic()` (must match `backend/alerts.py`) |
+  | `notifications.dart` | Draws Android alerts (#30): the background handler, foreground alerts, the "Bonus drops" channel, and alert taps |
   | `watch_store.dart` | The watch list (see Watching below), plus `WatchScope` |
   | `screens/` | `home_screen` (tabs and push taps), `today_screen`, `loot_screen`, `category_screen`, `raids_screen`, `about_screen` |
   | `widgets/` | Section header, banner image, activity card with `WeaponRow`/`WeaponBell`/`ItemTile`, featured grid and card with `RaidBell`, reset countdown, `WatchBell`, `AppTabBar`, `PageHeader` |
@@ -415,6 +428,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
 - **Today:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
   - **Layout, like the game's Portal:** "BONUS FOCUS" with one section per Portal category (SOLO OPS, FIRETEAM OPS… GAMBIT OPS) via `groupByCategory()`, cards showing only the activity name. Every weapon row has a watch bell.
   - Then "FEATURED THIS WEEK" with RAIDS and DUNGEONS, **kept at the bottom** (Bode, 2026-10-17): daily content changes more often, and the RAIDS & DUNGEONS tab shows the featured ones first anyway.
+    - Their cards have watch bells too (#30). Bode: everything farmable right now should be watchable from Today.
 - **Loot:** WATCHING (every watched weapon, with its bell), then one banner card per Portal category with its weapon count. A card opens `CategoryScreen`: the category's whole pool, each weapon with a bell.
   - `buildCategoryLoot()` merges the `lootPools` docs per category, listing each weapon once by `id`, so it's watched from one row (#26). The main pool is the weapon list most activities share. Weapons outside it are labeled "<activity> only" (e.g. Trials of Osiris, Sparrow Racing League, Warden of Nothing), which also covers Iron Banner or Trials-specific focus later.
   - **Only the Portal categories are shown** (`portalCategories`, kept in sync with `CATEGORY_ORDER` in `rotation.py`). That hides the one-off Campaign, Story and World quest weapons (Bode).
@@ -427,8 +441,16 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **The first watch asks for notification permission.** That's the only time a tap waits; once granted, it isn't asked again in that session. If it's denied, nothing is watched.
   - **Firebase calls are injected,** so `test/watch_store_test.dart` runs with fakes, including a "slow network" gate to prove the bell updates before the network answers.
   - **A reinstall starts with an empty list** (a new install gets new FCM registrations anyway).
-- **Tapping a push** (`HomeScreen`): `getInitialMessage()` (app was closed) and `onMessageOpenedApp` (app was in the background) switch the tab by the alert's `kind`: `weapon` → Today, `raid`/`dungeon` → Raids & Dungeons.
-  - With the app in the foreground, Android doesn't display FCM notification messages. That's fine, since the screens already update live.
+- **Tapping a push** (`HomeScreen`) switches the tab by the alert's `kind`: `weapon` → Today, `raid`/`dungeon` → Raids & Dungeons.
+  - **Android alerts** (drawn by the app, #30): `launchedFromAlert()` (app was closed) and `alertTaps` (app was running), both from `notifications.dart`.
+  - **Notifications FCM draws itself** (iOS alerts, console test pushes): `getInitialMessage()` and `onMessageOpenedApp`.
+- **Alerts drawn by the app** (`notifications.dart`, #30):
+  - **Background:** `onBackgroundAlert` runs in a separate background isolate (a fresh Dart instance) when the app isn't open. It must stay a top-level function with `@pragma('vm:entry-point')`.
+  - **Foreground:** alerts that arrive while the app is open are drawn too, through `onMessage`.
+  - **Images:** both are downloaded in parallel with a timeout. If one fails, the alert shows without it.
+  - **Channel:** our own "Bonus drops", high importance so alerts pop up. The manifest's `default_notification_channel_id` points FCM's own notifications (console tests) at it too, instead of FCM's "Misc".
+  - **Small icon:** still `@mipmap/ic_launcher`, as before. When the friend's app icon arrives (#10), make a monochrome notification icon from it.
+  - **iOS:** everything in `notifications.dart` is Android-only for now. Check in #17/#31 that iOS taps still reach `onMessageOpenedApp` with `flutter_local_notifications` installed.
 - **Performance (#20):**
   - **Judge smoothness in a release build** (`flutter run --release`). Debug builds scroll noticeably worse and aren't representative.
   - **Banners decode at their on-screen size** (`cacheWidth` in `BannerImage`, from `LayoutBuilder`) instead of Bungie's ~1920 px originals. `BoxFit.cover` on the taller grid cells is accounted for.
@@ -465,6 +487,10 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - Bungie's placeholder banner is replaced by real art where any exists (see Bungie API notes > Banners).
   - The Arena Ops and Solo Ops Quickplays share the same "Quickplay" banner, since the fallback works by name.
   - Midtown's banner comes from its Crucible map art.
+  - **Typhon Imperator** (Solo Ops, Neomuna) has no banner at all. All three of its definitions (two variants plus "Customize") have only the placeholder, and the game's Portal card art isn't in the public data (checked 2026-10-19).
+    - Its Today card shows the plain dark banner, and its alerts expand to the weapon's screenshot.
+    - A "same destination" fallback was rejected: Neomuna's most common real banner is HyperNet Current's, which would make Typhon Imperator look like a different activity.
+    - If Bungie adds art later, the banner fallback picks it up on the next manifest change.
 
 ### App setup on a new machine (including Bode's Mac)
 
@@ -510,7 +536,9 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #20 | Performance: instant bell taps, banners decoded at display size | S | Done |
 | #24 | Update CLAUDE.md status for a new session | S | Done |
 | #26 | Bug: duplicate weapon versions in Fireteam Ops, and missed alerts (weapons identified by name) | M | Done |
-| #28 | Bug: alerts arrive late and several collapse into one (Android high priority) | S | In progress |
+| #28 | Bug: alerts arrive late and several collapse into one (Android high priority) | S | Done |
+| #30 | Custom notifications on Android: weapon icon collapsed, activity banner expanded | M | In progress |
+| #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | Backlog |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
 | #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | S | Backlog |
@@ -528,13 +556,19 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-10-19, everything through #26 is merged into `main`, and `main` matches what's deployed.
+As of 2026-10-19, everything through #28 is merged into `main`, and `main` matches what's deployed.
 
-- **In progress: #28** (branch `task_28_alert_priority`): high-priority alerts, so they arrive on time and don't collapse into one.
-  - **Deployed from the branch on 2026-10-19,** so the backend is ahead of `main` until #28 merges.
-  - **Tested 2026-10-19 with the Pixel in forced deep Doze** (Push notifications > Testing delivery to an idle phone).
-    - The run started at 06:44:15 UTC, and all 3 watched focus weapons were posted between 06:45:06 and 06:45:08, while the phone was still idle.
-    - On 2026-10-18 the same situation gave one alert, 50 minutes late.
+- **In progress: #30** (branch `task_30_custom_notifications`): Android alerts drawn by the app, with the weapon icon collapsed and the activity banner expanded.
+  - Deploy the backend only together with the new app. Old app builds show nothing for data messages.
+  - **Deployed from the branch on 2026-10-19,** with the new release build on the Pixel, so the backend is ahead of `main` until #30 merges.
+  - **Tested 2026-10-19 with the forced-Doze recipe,** with the app's process stopped (`am kill`) so alerts start it from cold.
+    - 8 alerts were posted within 2 s, on the "Bonus drops" channel.
+    - Weapons: icon collapsed, banner expanded. Reckless Endangerment (Typhon Imperator) expands to its screenshot.
+    - Raids: banner as both the thumbnail and the expanded picture.
+    - Bode checked them on the phone.
+- **#28 (high priority) was tested on 2026-10-19 with the Pixel in forced deep Doze** (Push notifications > Testing delivery to an idle phone).
+  - The run started at 06:44:15 UTC, and all 3 watched focus weapons were posted between 06:45:06 and 06:45:08, while the phone was still idle.
+  - On 2026-10-18 the same situation gave one alert, 50 minutes late.
 
 - **Backend:** the Cloud Function `daily_rotation` is deployed from `main`'s `backend/`. It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts.
 - **Android app:** works end to end on Bode's Pixel.
@@ -545,9 +579,9 @@ As of 2026-10-19, everything through #26 is merged into `main`, and `main` match
   - Watching a weapon subscribes to its topic (checked on the emulator).
   - A real backend alert for a watched weapon reached the Pixel on 2026-10-18 (Hammerhead), but late and alone, which led to #28.
   - With #28, every watched alert reaches an idle Pixel right away (forced-Doze test, 2026-10-19).
-- **Not verified yet:** tapping a push opening the right tab (weapon → Today, raid → Raids & Dungeons).
-  - Also watch a normal reset to confirm #28 outside the forced test.
-  - Ask Bode how it went. If either fails, open a bug task.
+  - With #30, tapping an alert opens the right tab: weapon → Today, raid → Raids & Dungeons (Bode, 2026-10-19).
+- **Not verified yet:** a normal reset with #28 and #30, outside the forced test.
+  - Ask Bode how it went. If it fails, open a bug task.
 - **Next tasks, in suggested order:**
   1. **#17** iOS on Bode's Mac. It blocks the friend, the iOS tester. Start with CLAUDE.md > "App setup on a new machine".
   2. **#10** release. It needs #17 and the friend's app icon (brief: "D2 Loot Alert – App Icon Brief", a Claude Doc Bode exported as PDF).
@@ -609,4 +643,11 @@ As of 2026-10-19, everything through #26 is merged into `main`, and `main` match
   - Alerts still name every activity where the weapon is the focus (Bode).
 - **2026-10-19:** **Alerts are sent with Android high priority** (#28).
   - FCM held normal-priority alerts while the phone was in Doze and kept only the newest, since notification messages share one collapse key.
-  - Data messages with local notifications would also survive a fully offline phone, but need a new package. Skipped for now.
+  - Data messages with local notifications would also survive a fully offline phone, but need a new package. Skipped for now. (Done in #30, for the banner.)
+- **2026-10-19:** **Android alerts are drawn by the app** (#30).
+  - The backend sends Android data messages, and `flutter_local_notifications` draws the weapon icon collapsed and the activity banner expanded. Bode wanted the banner, but FCM's own notifications allow only one image.
+  - iPhones keep a normal APNs alert. #31 brings the banner there with a Notification Content Extension.
+  - Raid alerts show the raid's banner when expanded, and as the thumbnail when collapsed.
+  - A weapon whose focus activities have no banner shows its own screenshot instead.
+  - Today's featured raids and dungeons got watch bells in the same task (Bode).
+  - The app has its own "Bonus drops" channel instead of FCM's "Misc".
