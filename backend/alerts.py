@@ -90,6 +90,10 @@ def send(alerts):
             topic=alert["topic"],
             notification=messaging.Notification(title=alert["title"], body=alert["body"], image=image),
             data=alert["data"],
+            # High priority so FCM delivers right away, even to a phone in Doze (#28).
+            # Otherwise it holds the alerts until the phone wakes, and since
+            # notification messages all share one collapse key, only the newest survives.
+            android=messaging.AndroidConfig(priority="high"),
             # iOS only shows an image if the app has a Notification Service Extension (#8),
             # and only runs that extension when mutable-content is set.
             apns=messaging.APNSConfig(
