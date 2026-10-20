@@ -191,13 +191,26 @@ def by_class(armor):
     return (order.index(armor["class"]) if armor["class"] in order else len(order), armor["name"])
 
 
-def xur_stock(api):
+def xur_is_here(now):
+    """True from Friday's reset to Tuesday's (17:00 UTC), while Xûr is in the game.
+
+    His schedule decides, not the endpoint: after he left on Tuesday 2026-10-20,
+    Bungie still returned him as enabled with the same stock until its Friday
+    refresh (#36).
+    """
+    reset_day = (now - timedelta(hours=RESET_HOUR_UTC)).date()
+    return reset_day.weekday() in (4, 5, 6, 0)  # the reset days Friday to Monday
+
+
+def xur_stock(api, now):
     """The exotic armor Xûr is selling, or [] when he isn't in the game (Friday to Tuesday reset).
 
     The public vendors endpoint shows names only: no stats, and no exotic weapons
     (those are behind his "Strange Gear Offers", which needs a Bungie login). The
     rest of his stock (engrams, materials...) is filtered out by armor_info().
     """
+    if not xur_is_here(now):
+        return []
     try:
         response = api.request("/Destiny2/Vendors/?components=400,402")
     except BungieError as err:
@@ -263,7 +276,7 @@ def build_snapshot(api, data, profile, now):
                              key=lambda a: (category_rank(a["category"]), a["category"], a["name"])),
         "featured": sorted(featured.values(), key=lambda f: (f["kind"], f["name"])),
         "raidsAndDungeons": build_raid_catalog(data, profile),  # everything the app can watch
-        "xur": xur_stock(api),  # the exotic armor he's selling; [] when he's not in the game
+        "xur": xur_stock(api, now),  # the exotic armor he's selling; [] when he's not in the game
     }
 
 
