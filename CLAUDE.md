@@ -169,7 +169,9 @@ No user accounts and no login. The README holds the public-facing scope.
     - `DestinyInventoryItemLiteDefinition` is 61 MB, so items stay single lookups.
   - Exotic armor has a `screenshot` (a 16:9 render), like weapons.
   - The single-definition endpoint fails for some activity hashes (e.g. Prophecy, Vesper's Host, Last Wish) that the whole table has. Use the table.
-  - **Not checked yet:** what the endpoint returns after he leaves on Tuesday. The code treats "disabled" or "no sales" as absent. Check with a dry run after a Tuesday reset.
+  - **After he leaves on Tuesday, the endpoint keeps showing him** (checked 2026-10-20 after the reset): `enabled: true`, the same 19 items, and `nextRefreshDate` set to Friday 09:00 UTC.
+    - So the backend goes by his **schedule** (`xur_is_here()`: Friday's reset to Tuesday's, 17:00 UTC) and doesn't call the endpoint outside it (#36).
+    - Before #36, his old stock stayed on TODAY, and the first run of the new week resent the Xûr alerts.
 
 ### Key data shapes
 
@@ -396,7 +398,7 @@ Flutter app (Android + iOS)
   - **Images:** the armor icon collapsed, the armor's screenshot expanded.
   - **Tapping it** opens Today, where his stock is listed.
   - A visit runs Friday reset to Tuesday reset, inside one week ID, so it shares `sentWeekId` with raids.
-  - **No stock** (he's gone, or the vendors call fails) means no Xûr alerts. The weapon and raid alerts still go out.
+  - **No stock** means no Xûr alerts: outside his Friday-to-Tuesday window, or when the vendors call fails. The weapon and raid alerts still go out.
 - **Never twice:** `meta/state` stores `sentResetId` + `sentWeaponTopics` and `sentWeekId` + `sentRaidTopics` + `sentXurTopics`.
   - **Week ID** is the date of the most recent Tuesday 17:00 UTC reset.
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
@@ -417,7 +419,7 @@ Flutter app (Android + iOS)
   4. Force run the scheduler job. Then read the post times as above.
   5. Undo: `adb shell dumpsys deviceidle unforce` and `adb shell dumpsys battery reset`.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
-- **Tests:** run `python -m unittest discover backend` from the repo root (31 tests, standard library only). They cover the reset and week math, alert wording and data, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
+- **Tests:** run `python -m unittest discover backend` from the repo root (33 tests, standard library only). They cover the reset and week math, alert wording and data, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
 - **Watch types are simplified** to "weapon, in any activity and any version", "raid or dungeon", and "exotic armor Xûr sells" (#13). A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
@@ -586,7 +588,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
 | #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | Done |
-| #34 | Today: READY TO FARM section with what you watch that's available now | S | In progress |
+| #34 | Today: READY TO FARM section with what you watch that's available now | S | Done |
+| #36 | Bug: Xûr's stock keeps showing (and re-alerting) after he leaves on Tuesday | S | In progress |
 | later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
 | later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
@@ -601,11 +604,13 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-10-20, everything through #13 is merged into `main`, and `main` matches what's deployed.
+As of 2026-10-20, everything through #34 is merged into `main`, and `main` matches what's deployed.
 
-- **In progress: #34** (branch `task_34_ready_to_farm`): READY TO FARM at the top of TODAY. App only, no backend change.
+- **In progress: #36** (branch `task_36_xur_schedule`): Xûr counts as present only from Friday's reset to Tuesday's, so his stale stock stops showing and re-alerting.
+  - **Deployed from the branch on 2026-10-20,** so the backend is ahead of `main` until #36 merges.
+  - **Checked:** the 18:34 UTC Force run that Tuesday wrote `xur: []`, and TODAY's XÛR section went away (Bode). His return is first checked at Friday's 17:07 UTC run.
 - **#13 (Xûr) was checked on the Pixel on 2026-10-19:** Xûr alerts for belled pieces arrived. The XÛR screens, card art and TODAY section looked right (Bode).
-  - **Still to watch:** the first Friday arrival (17:07 UTC run) and what the vendors endpoint returns after he leaves on Tuesday.
+  - **Still to watch:** the first Friday arrival (17:07 UTC run). The Tuesday departure was answered by #36.
 - **#30 was tested on 2026-10-19 with the forced-Doze recipe,** with the app's process stopped (`am kill`) so alerts start it from cold.
   - 8 alerts were posted within 2 s, on the "Bonus drops" channel.
   - Weapons: icon collapsed, banner expanded. Reckless Endangerment (Typhon Imperator) expands to its screenshot.
@@ -694,6 +699,7 @@ As of 2026-10-20, everything through #13 is merged into `main`, and `main` match
   - A weapon whose focus activities have no banner shows its own screenshot instead.
   - Today's featured raids and dungeons got watch bells in the same task (Bode).
   - The app has its own "Bonus drops" channel instead of FCM's "Misc".
+- **2026-10-20:** **Xûr's presence follows his schedule, not the API** (#36). Bungie's public endpoint keeps returning his last stock until its Friday refresh, so outside Friday-to-Tuesday reset the backend treats him as gone.
 - **2026-10-20:** **READY TO FARM tops TODAY** (#34), with copies of everything watched that's available now: weapons' activities, featured raids and dungeons, and Xûr's armor.
   - The name was picked by Bode over WATCHING, ON YOUR LIST, FARM NOW and YOUR DROPS TODAY.
   - Copies, not moves, so the sections below stay complete.

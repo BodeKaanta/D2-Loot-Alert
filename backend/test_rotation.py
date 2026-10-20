@@ -131,6 +131,8 @@ def exotic_armor(name, class_type, slot):
             "displayProperties": {"name": name, "icon": f"/{name}.jpg"}, "screenshot": f"/{name}-shot.jpg"}
 
 
+SATURDAY = utc(2026, 10, 17, 20, 0)  # Xûr is in the game
+
 OMNIOCULUS = {"id": "omnioculus", "name": "Omnioculus", "class": "Hunter", "slot": "Chest Armor",
               "icon": "https://x/omni.jpg", "screenshot": "https://x/omni-shot.jpg"}
 
@@ -146,13 +148,27 @@ class Xur(unittest.TestCase):
         vendors = {"vendors": {"data": {str(rotation.XUR): {"enabled": True}}},
                    "sales": {"data": {str(rotation.XUR): {"saleItems": {
                        "1": {"itemHash": 1}, "2": {"itemHash": 2}, "3": {"itemHash": 3}}}}}}
-        stock = rotation.xur_stock(FakeItems(items, vendors))
+        stock = rotation.xur_stock(FakeItems(items, vendors), SATURDAY)
         self.assertEqual([(a["name"], a["class"], a["slot"]) for a in stock],
                          [("Peacekeepers", "Titan", "Leg Armor"), ("Omnioculus", "Hunter", "Chest Armor")])
         self.assertEqual(stock[1]["screenshot"], "https://www.bungie.net/Omnioculus-shot.jpg")
 
     def test_nothing_when_he_is_not_in_the_game(self):
-        self.assertEqual(rotation.xur_stock(FakeItems({}, {"vendors": {"data": {}}, "sales": {"data": {}}})), [])
+        self.assertEqual(rotation.xur_stock(FakeItems({}, {"vendors": {"data": {}}, "sales": {"data": {}}}), SATURDAY), [])
+
+    def test_he_is_here_from_friday_reset_to_tuesday_reset(self):
+        self.assertFalse(rotation.xur_is_here(utc(2026, 10, 23, 16, 59)))  # Friday, before reset
+        self.assertTrue(rotation.xur_is_here(utc(2026, 10, 23, 17, 0)))    # Friday reset: he arrives
+        self.assertTrue(rotation.xur_is_here(utc(2026, 10, 27, 16, 59)))   # Tuesday, just before reset
+        self.assertFalse(rotation.xur_is_here(utc(2026, 10, 27, 17, 0)))   # Tuesday reset: he leaves
+
+    def test_after_he_leaves_his_stale_stock_is_ignored(self):
+        # On Tuesday 2026-10-20 after reset, Bungie still returned his old stock (#36).
+        class Stale(FakeItems):
+            def request(self, path):
+                raise AssertionError("shouldn't ask Bungie while he's away")
+        tuesday_after_reset = utc(2026, 10, 20, 18, 7)
+        self.assertEqual(rotation.xur_stock(Stale({}), tuesday_after_reset), [])
 
     def test_catalog_finds_collectibles_in_every_node_below_armor(self):
         nodes = {str(rotation.EXOTIC_ARMOR_NODE): {"children": {"presentationNodes": [{"presentationNodeHash": 10}]}},
