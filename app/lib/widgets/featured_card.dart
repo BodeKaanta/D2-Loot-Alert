@@ -8,10 +8,11 @@ import 'watch_bell.dart';
 
 /// Two-column grid of raids or dungeons, optionally with a watch bell on each.
 class FeaturedGrid extends StatelessWidget {
-  const FeaturedGrid({super.key, required this.featured, this.showBells = false});
+  const FeaturedGrid({super.key, required this.featured, this.showBells = false, this.showKind = false});
 
   final List<Featured> featured;
   final bool showBells;
+  final bool showKind; // see FeaturedCard.showKind
 
   @override
   Widget build(BuildContext context) {
@@ -23,16 +24,20 @@ class FeaturedGrid extends StatelessWidget {
       // The whole screen scrolls as one list, so the grid itself doesn't.
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      children: [for (final f in featured) FeaturedCard(featured: f, showBell: showBells)],
+      children: [for (final f in featured) FeaturedCard(featured: f, showBell: showBells, showKind: showKind)],
     );
   }
 }
 
 class FeaturedCard extends StatelessWidget {
-  const FeaturedCard({super.key, required this.featured, this.showBell = false});
+  const FeaturedCard({super.key, required this.featured, this.showBell = false, this.showKind = false});
 
   final Featured featured;
   final bool showBell;
+
+  /// "RAID" or "DUNGEON" under the name, for grids without a RAIDS / DUNGEONS
+  /// header above them (READY TO FARM, #34).
+  final bool showKind;
 
   @override
   Widget build(BuildContext context) {
@@ -43,9 +48,19 @@ class FeaturedCard extends StatelessWidget {
         children: [
           BannerImage(
             url: featured.image,
-            // Just the name: the RAIDS / DUNGEONS header above already says what it is.
-            child: Text(featured.name.toUpperCase(),
-                style: AppText.cardTitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+            // Usually just the name: the RAIDS / DUNGEONS header above already says what it is.
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(featured.name.toUpperCase(),
+                    style: AppText.cardTitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+                if (showKind) ...[
+                  const SizedBox(height: 2),
+                  Text(featured.kind.toUpperCase(), style: AppText.label),
+                ],
+              ],
+            ),
           ),
           if (showBell) Positioned(top: 0, right: 0, child: RaidBell(raid: featured)),
         ],

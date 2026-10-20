@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../theme.dart';
+import '../watch_store.dart';
 import '../widgets/activity_card.dart';
 import '../widgets/armor_row.dart';
 import '../widgets/featured_card.dart';
@@ -65,7 +66,15 @@ class _RotationList extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       children: [
         const _Header(),
-        const SizedBox(height: 28),
+        // A gold line between the countdown and the content (Bode, #34). The gold
+        // sets it apart from the section headers' grey rules. 1.5 pt was Bode's
+        // pick after trying 1, 2 and 4.
+        const SizedBox(height: 20),
+        const Divider(color: AppColors.exotic, thickness: 1.5, height: 1.5),
+        const SizedBox(height: 24),
+        // Always one child, even when empty: if it changes while you're scrolled
+        // further down, the list only lays out what's on screen, so nothing jumps.
+        _ReadyToFarm(rotation: rotation),
         const _GroupTitle('Bonus focus'),
         if (rotation.activities.isEmpty)
           const Text('No bonus focus weapons right now.', style: AppText.body),
@@ -102,7 +111,45 @@ class _RotationList extends StatelessWidget {
   }
 }
 
-/// "BONUS FOCUS" / "FEATURED THIS WEEK": the two big parts of the screen.
+/// READY TO FARM (#34): copies of everything you watch that can be farmed right
+/// now, so it's at the top instead of spread down the page. Hidden when there's
+/// nothing. Reading WatchScope means it updates as soon as a bell is tapped.
+class _ReadyToFarm extends StatelessWidget {
+  const _ReadyToFarm({required this.rotation});
+
+  final Rotation rotation;
+
+  @override
+  Widget build(BuildContext context) {
+    final watches = WatchScope.of(context);
+    final ready = ReadyToFarm.from(
+      rotation,
+      watchingWeapon: watches.isWatchingWeapon,
+      watchingRaid: watches.isWatchingRaid,
+      watchingArmor: watches.isWatchingArmor,
+    );
+    if (ready.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _GroupTitle('Ready to farm'),
+        for (final activity in ready.activities)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ActivityCard(activity: activity, showCategory: true),
+          ),
+        if (ready.featured.isNotEmpty) ...[
+          FeaturedGrid(featured: ready.featured, showBells: true, showKind: true),
+          const SizedBox(height: 12),
+        ],
+        for (final armor in ready.armor) ArmorRow(armor: armor, subtitle: '${armor.description} · Xûr'),
+        const SizedBox(height: 28),
+      ],
+    );
+  }
+}
+
+/// "READY TO FARM" / "BONUS FOCUS" / "FEATURED THIS WEEK": the big parts of the screen.
 class _GroupTitle extends StatelessWidget {
   const _GroupTitle(this.title);
 

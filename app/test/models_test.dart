@@ -108,6 +108,38 @@ void main() {
     expect(ExoticArmorCatalog.fromMap(null).armor, isEmpty); // no catalog written yet
   });
 
+  test('READY TO FARM: only watched things available now, each place a weapon drops (#34)', () {
+    ActivityGroup activity(String name, Weapon weapon) =>
+        ActivityGroup(id: name, name: name, category: 'Solo Ops', weapons: [weapon]);
+    final rotation = Rotation(
+      resetId: '2026-10-20',
+      activities: [
+        activity('Quickplay', w(1, 'Ecliptic Distaff')),
+        activity('Quickplay: Master', w(1, 'Ecliptic Distaff')),
+        activity('Typhon Imperator', w(2, 'Reckless Endangerment')),
+      ],
+      featured: const [
+        Featured(id: 'last-wish', name: 'Last Wish', kind: 'raid'),
+        Featured(id: 'prophecy', name: 'Prophecy', kind: 'dungeon'),
+      ],
+      xur: const [ExoticArmor(id: 'omnioculus', name: 'Omnioculus', guardianClass: 'Hunter', slot: 'Chest Armor')],
+    );
+
+    final ready = ReadyToFarm.from(
+      rotation,
+      watchingWeapon: (id) => id == 'ecliptic-distaff',
+      watchingRaid: (id) => id == 'prophecy',
+      watchingArmor: (id) => id == 'omnioculus',
+    );
+    expect(ready.activities.map((a) => a.name), ['Quickplay', 'Quickplay: Master']); // both places
+    expect(ready.featured.map((f) => f.name), ['Prophecy']);
+    expect(ready.armor.single.name, 'Omnioculus');
+
+    final nothing = ReadyToFarm.from(rotation,
+        watchingWeapon: (_) => false, watchingRaid: (_) => false, watchingArmor: (_) => false);
+    expect(nothing.isEmpty, isTrue); // the section is hidden
+  });
+
   test('groups activities by category, keeping the backend order', () {
     ActivityGroup group(String name, String category) =>
         ActivityGroup(id: '', name: name, category: category, weapons: const []);

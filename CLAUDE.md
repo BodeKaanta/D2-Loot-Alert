@@ -449,6 +449,14 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
 
 - **Tabs** (bottom, `AppTabBar`, **three equal thirds** so LOOT sits in the middle, as Bode asked): **TODAY / LOOT / RAIDS & DUNGEONS**. "RAIDS &" / "DUNGEONS" is stacked on two lines (Bode: it crowded the screen edge; stacking also keeps one text size on narrower iPhones). Every tab has the same two-line label area, so the underlines line up. The last name matches the game's wording (Bode). `IndexedStack` keeps each tab's scroll position.
 - **Today:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
+  - **Under the title and countdown, a separating line** (#34, Bode): exotic gold (`AppColors.exotic`), 1.5 pt thick. The gold sets it apart from the section headers' 1 pt grey rules (Bode's pick after trying grey, and 1, 2 and 4 pt).
+  - **READY TO FARM first** (#34, name picked by Bode): **copies** of everything watched that can be farmed right now.
+    - Bonus focus activity cards with a watched weapon, each showing its category. A weapon in two activities shows both cards.
+    - Watched featured raids and dungeons, each card labelled RAID or DUNGEON.
+    - Watched exotic armor Xûr is selling.
+    - Hidden when there's nothing. `ReadyToFarm.from()` in `models.dart` decides what goes in it.
+    - **It's always one list child** (an empty box when hidden), so a change while you're scrolled further down doesn't move what's on screen: `ListView` only lays out the children near the viewport.
+    - The sections below are unchanged.
   - **Layout, like the game's Portal:** "BONUS FOCUS" with one section per Portal category (SOLO OPS, FIRETEAM OPS… GAMBIT OPS) via `groupByCategory()`, cards showing only the activity name. Every weapon row has a watch bell.
   - Then "FEATURED THIS WEEK" with RAIDS and DUNGEONS, **kept at the bottom** (Bode, 2026-10-17): daily content changes more often, and the RAIDS & DUNGEONS tab shows the featured ones first anyway.
     - Their cards have watch bells too (#30). Bode: everything farmable right now should be watchable from Today.
@@ -491,7 +499,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Judge smoothness in a release build** (`flutter run --release`). Debug builds scroll noticeably worse and aren't representative.
   - **Banners decode at their on-screen size** (`cacheWidth` in `BannerImage`, from `LayoutBuilder`) instead of Bungie's ~1920 px originals. `BoxFit.cover` on the taller grid cells is accounted for.
   - **No disk image cache.** Release scrolling was already smooth, so it wasn't worth a new package.
-- **Tests:** `flutter test` (19 tests: models, category loot, reset math, watch store) and `flutter analyze`, both clean as of #13.
+- **Tests:** `flutter test` (20 tests: models, category loot, READY TO FARM, reset math, watch store) and `flutter analyze`, both clean as of #13.
 
 ### Design system (agreed with Bode in #8)
 
@@ -500,7 +508,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - background `#0B0E11`, cards `#151A1F`
   - 1 px borders at 15% white (item tiles at 30%)
   - text `#E9E7E2`, secondary text `#8B939C`
-  - exotic gold `#CEAE33`: **the one bright accent.** It's used for the 4×20 bar in front of each section header, a *watched* bell, the active tab's underline, and the "FEATURED THIS WEEK" label on raid rows. Keep it rare so it stays a landmark.
+  - exotic gold `#CEAE33`: **the one bright accent.** It's used for the 4×20 bar in front of each section header, a *watched* bell, the active tab's underline, the 1.5 pt line under TODAY's countdown (#34, Bode's choice), and the "FEATURED THIS WEEK" label on raid rows. Keep it rare so it stays a landmark.
 - **Type:** **Inter** (SIL OFL 1.1, bundled in `app/assets/fonts/` with `Inter-OFL.txt`, which must stay).
   - Headers are uppercase with wide letter spacing (`AppText.appTitle`, `groupTitle`, `sectionHeader`, `cardTitle`, `label`). Widgets call `.toUpperCase()` themselves.
   - **Hierarchy,** largest first:
@@ -577,7 +585,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | Backlog |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
 | #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
-| #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | In progress |
+| #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | Done |
+| #34 | Today: READY TO FARM section with what you watch that's available now | S | In progress |
 | later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
 | later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
@@ -592,13 +601,10 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-10-19, everything through #30 is merged into `main`, and `main` matches what's deployed.
+As of 2026-10-20, everything through #13 is merged into `main`, and `main` matches what's deployed.
 
-- **In progress: #13** (branch `task_13_xur_alerts`): Xûr's exotic armor.
-  - A full catalog of 141 pieces to watch on LOOT, his stock on TODAY, and an alert per watched piece he sells.
-  - Dry-run checked on 2026-10-19 against his live stock: 6 pieces, and the catalog built.
-  - **Deployed from the branch on 2026-10-19,** with the new release build on the Pixel, so the backend is ahead of `main` until #13 merges.
-  - **Checked on the Pixel on 2026-10-19:** Xûr alerts for belled pieces arrived. The XÛR screens, card art and TODAY section looked right (Bode).
+- **In progress: #34** (branch `task_34_ready_to_farm`): READY TO FARM at the top of TODAY. App only, no backend change.
+- **#13 (Xûr) was checked on the Pixel on 2026-10-19:** Xûr alerts for belled pieces arrived. The XÛR screens, card art and TODAY section looked right (Bode).
   - **Still to watch:** the first Friday arrival (17:07 UTC run) and what the vendors endpoint returns after he leaves on Tuesday.
 - **#30 was tested on 2026-10-19 with the forced-Doze recipe,** with the app's process stopped (`am kill`) so alerts start it from cold.
   - 8 alerts were posted within 2 s, on the "Bonus drops" channel.
@@ -623,9 +629,6 @@ As of 2026-10-19, everything through #30 is merged into `main`, and `main` match
   1. **#17** iOS on Bode's Mac. It blocks the friend, the iOS tester. Start with CLAUDE.md > "App setup on a new machine". Bode has no Mac at hand as of 2026-10-19.
   2. **#31** the iOS version of the custom notifications, after #17.
   3. **#10** release. It needs #17 and the friend's app icon (brief: "D2 Loot Alert – App Icon Brief", a Claude Doc Bode exported as PDF).
-  4. **Not created yet:** a WATCHING section at the top of Today's BONUS FOCUS, with copies of the activity cards whose weapon Bode watches (Bode's idea, 2026-10-19).
-     - Claude suggested: copy rather than move, show the category on each copy, hide the section when it's empty, and no list jump when a bell lower down is tapped.
-     - Open question for Bode: include watched featured raids and dungeons, which would put it above BONUS FOCUS?
 - **Keep an eye on:**
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
   - "Still open (minor)" above.
@@ -691,6 +694,9 @@ As of 2026-10-19, everything through #30 is merged into `main`, and `main` match
   - A weapon whose focus activities have no banner shows its own screenshot instead.
   - Today's featured raids and dungeons got watch bells in the same task (Bode).
   - The app has its own "Bonus drops" channel instead of FCM's "Misc".
+- **2026-10-20:** **READY TO FARM tops TODAY** (#34), with copies of everything watched that's available now: weapons' activities, featured raids and dungeons, and Xûr's armor.
+  - The name was picked by Bode over WATCHING, ON YOUR LIST, FARM NOW and YOUR DROPS TODAY.
+  - Copies, not moves, so the sections below stay complete.
 - **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
   - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.
   - **Topics** are `xur_<name slug>`, like weapons (#26 showed hashes aren't stable).
