@@ -7,11 +7,13 @@ import 'banner_image.dart';
 import 'watch_bell.dart';
 
 /// One activity's card: its banner and name, then its bonus focus weapons.
-/// The category isn't repeated here; the section header above shows it.
+/// The category usually isn't repeated here, since the section header above
+/// shows it. Copies in READY TO FARM have no such header, so they show it (#34).
 class ActivityCard extends StatelessWidget {
-  const ActivityCard({super.key, required this.activity});
+  const ActivityCard({super.key, required this.activity, this.showCategory = false});
 
   final ActivityGroup activity;
+  final bool showCategory;
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +28,17 @@ class ActivityCard extends StatelessWidget {
           BannerImage(
             url: activity.image,
             height: 72,
-            child: Text(activity.name.toUpperCase(), style: AppText.cardTitle),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(activity.name.toUpperCase(), style: AppText.cardTitle),
+                if (showCategory) ...[
+                  const SizedBox(height: 2),
+                  Text(activity.category.toUpperCase(), style: AppText.label),
+                ],
+              ],
+            ),
           ),
           for (final weapon in activity.weapons)
             WeaponRow(weapon: weapon, trailing: WeaponBell(weapon: weapon, category: activity.category)),

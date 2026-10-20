@@ -157,6 +157,35 @@ class Rotation {
       );
 }
 
+/// What TODAY's READY TO FARM section shows (#34): everything watched that can
+/// be farmed right now. They're copies; the sections below still list everything.
+class ReadyToFarm {
+  const ReadyToFarm({required this.activities, required this.featured, required this.armor});
+
+  final List<ActivityGroup> activities; // bonus focus activities with a watched weapon
+  final List<Featured> featured; // watched raids and dungeons featured this week
+  final List<ExoticArmor> armor; // watched exotic armor Xûr is selling
+
+  bool get isEmpty => activities.isEmpty && featured.isEmpty && armor.isEmpty;
+
+  /// The `watching...` checks come from the WatchStore; passing them in keeps this testable.
+  factory ReadyToFarm.from(
+    Rotation rotation, {
+    required bool Function(String id) watchingWeapon,
+    required bool Function(String id) watchingRaid,
+    required bool Function(String id) watchingArmor,
+  }) =>
+      ReadyToFarm(
+        // Every activity with a watched focus, so a weapon in two activities shows both.
+        activities: [
+          for (final activity in rotation.activities)
+            if (activity.weapons.any((w) => watchingWeapon(w.id))) activity,
+        ],
+        featured: [for (final raid in rotation.featured) if (watchingRaid(raid.id)) raid],
+        armor: [for (final armor in rotation.xur) if (watchingArmor(armor.id)) armor],
+      );
+}
+
 /// The game's Portal categories, in its order. Keep in sync with CATEGORY_ORDER
 /// in backend/rotation.py. The LOOT tab shows only these, which also hides
 /// one-off quest weapons (Campaign, Story, World).
