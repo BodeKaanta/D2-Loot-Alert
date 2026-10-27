@@ -562,6 +562,9 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 - **Emulator** (`Medium_Phone_API_36.1`): it only has about 450 MB free, so the 150 MB all-CPU debug APK won't install. Build just its CPU type instead: `flutter build apk --debug --target-platform android-x64 --split-per-abi`, then `adb install -r build/app/outputs/flutter-apk/app-x86_64-debug.apk`.
   - The emulator also has Bode's `hand_speed_calculator` app. **Don't uninstall it or wipe the emulator.**
 - **From Git Bash,** set `MSYS_NO_PATHCONV=1` before `adb shell` commands with `/` paths, or Git Bash rewrites them. adb is at `C:/Users/bodek/AppData/Local/Android/sdk/platform-tools/adb.exe`.
+- **README screenshots** (#38): capture with `adb exec-out screencap -p`, then crop off the top 140 px (status bar) and bottom 60 px (gesture bar) and scale to 540 px wide with Pillow.
+  - Android's demo mode (`com.android.systemui.demo`) fixes the clock and battery, but on the Pixel it doesn't hide notification icons. Crop instead.
+  - Never keep a full shade screenshot: it shows Bode's personal notifications. Crop to the app's card, then delete the original.
 - **Push test** (debug builds only):
   1. In the app, open About → **Enable notifications**. It asks permission and subscribes to topic `test`.
   2. Put the app in the background.
@@ -589,7 +592,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | Done |
 | #34 | Today: READY TO FARM section with what you watch that's available now | S | Done |
-| #36 | Bug: Xûr's stock keeps showing (and re-alerting) after he leaves on Tuesday | S | In progress |
+| #36 | Bug: Xûr's stock keeps showing (and re-alerting) after he leaves on Tuesday | S | Done |
+| #38 | Update the README now that the Android app works | S | In progress |
 | later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
 | later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
@@ -604,11 +608,10 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-10-20, everything through #34 is merged into `main`, and `main` matches what's deployed.
+As of 2026-10-27, everything through #36 is merged into `main`, and `main` matches what's deployed.
 
-- **In progress: #36** (branch `task_36_xur_schedule`): Xûr counts as present only from Friday's reset to Tuesday's, so his stale stock stops showing and re-alerting.
-  - **Deployed from the branch on 2026-10-20,** so the backend is ahead of `main` until #36 merges.
-  - **Checked:** the 18:34 UTC Force run that Tuesday wrote `xur: []`, and TODAY's XÛR section went away (Bode). His return is first checked at Friday's 17:07 UTC run.
+- **In progress: #38** (branch `task_38_readme`): the public README rewritten for the working Android app, with screenshots in `docs/screenshots/`.
+  - **#36 checked:** the 18:34 UTC Force run that Tuesday wrote `xur: []`, and TODAY's XÛR section went away (Bode). His return is first checked at Friday's 17:07 UTC run.
 - **#13 (Xûr) was checked on the Pixel on 2026-10-19:** Xûr alerts for belled pieces arrived. The XÛR screens, card art and TODAY section looked right (Bode).
   - **Still to watch:** the first Friday arrival (17:07 UTC run). The Tuesday departure was answered by #36.
 - **#30 was tested on 2026-10-19 with the forced-Doze recipe,** with the app's process stopped (`am kill`) so alerts start it from cold.
@@ -636,6 +639,7 @@ As of 2026-10-20, everything through #34 is merged into `main`, and `main` match
   3. **#10** release. It needs #17 and the friend's app icon (brief: "D2 Loot Alert – App Icon Brief", a Claude Doc Bode exported as PDF).
 - **Keep an eye on:**
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
+  - **Banner images don't retry.** If one fails to download once (seen on LOOT on 2026-10-27: the Solo, Fireteam and Arena Ops cards stayed black), it stays blank until the app restarts. The links were fine. A retry in `BannerImage` would fix it; not a task yet.
   - "Still open (minor)" above.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
@@ -685,6 +689,11 @@ As of 2026-10-20, everything through #34 is merged into `main`, and `main` match
 - **2026-10-17:** Vendor weapon alerts are a later task (they need OAuth). Xûr's exotic armor alerts are task #13, after #7.
 - **2026-10-17:** Backend schedule: one run shortly after reset plus two backup runs, with alerts sent only once per reset.
 - **2026-10-17:** App registration and the APNs key moved from #5 to #8, where `flutterfire configure` handles registration.
+- **2026-10-27:** **Donations (to help cover the $99/year Apple developer fee): no ads, and no donation link or prompt inside the app.** Apple's rules (Guideline 3.1.1) and Google Play's payments policy are strict about payments to the developer from inside an app, and a hidden link can still get a store release rejected.
+  - **Plan:** the About screen gets one neutrally worded link, "Project page and source code", to the public GitHub repo. The donation link lives on GitHub only, as a Sponsor button via `.github/FUNDING.yml` (Buy Me a Coffee, Patreon or GitHub Sponsors).
+  - **Keep the in-app wording free of "donate", "tip" or "support"**, with no banners, popups or prompts, and nothing locked behind the link.
+  - **Before a public store release,** re-read the current Apple and Google guidelines, since the external-link rules have been changing. Also check Bungie's API terms and fan-content policy on donations; CLAUDE.md's art rules say "making money" crosses the line, and it's unclear whether donations count.
+  - Not built yet. Needs its own task on the board (S).
 - **2026-10-18:** **Weapons are identified by name, not item hash** (#26).
   - Bungie has several hashes for some weapons (the Warden of Nothing GM versions), and the bonus focus can be any of them.
   - Watching a weapon covers every version, and LOOT lists each weapon once, with no layout change.
