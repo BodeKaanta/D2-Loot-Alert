@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 // Push notification helpers. Watching something = subscribing this phone to its
@@ -20,9 +22,10 @@ Future<bool> requestNotificationPermission() async {
 }
 
 /// Subscribes this device to [topic]. Returns false if it failed, e.g. no
-/// network, or on iOS before the push key from #17 is set up.
+/// network, or on iOS if Apple never gave the app its push token.
 Future<bool> subscribe(String topic) async {
   try {
+    await _waitForApnsToken();
     await FirebaseMessaging.instance.subscribeToTopic(topic);
     return true;
   } catch (_) {
@@ -32,9 +35,24 @@ Future<bool> subscribe(String topic) async {
 
 Future<bool> unsubscribe(String topic) async {
   try {
+    await _waitForApnsToken();
     await FirebaseMessaging.instance.unsubscribeFromTopic(topic);
     return true;
   } catch (_) {
     return false;
+  }
+}
+
+/// iOS only (#17). FCM reaches an iPhone or iPad through Apple's push service
+/// (APNs), so it needs the device's APNs token before it can change topics.
+/// iOS hands the token to the app a moment after launch, and firebase_messaging
+/// throws `apns-token-not-set` instead of waiting for it. A bell tapped right
+/// after opening the app could beat it, so wait up to 10 seconds. If the token
+/// still isn't there, the topic call throws and the tap is undone as usual.
+Future<void> _waitForApnsToken() async {
+  if (!Platform.isIOS) return;
+  for (var tries = 0; tries < 20; tries++) {
+    if (await FirebaseMessaging.instance.getAPNSToken() != null) return;
+    await Future.delayed(const Duration(milliseconds: 500));
   }
 }

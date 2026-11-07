@@ -9,8 +9,10 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 // the weapon icon when collapsed, the activity's banner when expanded. FCM's own
 // notifications have room for one image, used for both.
 //
-// iPhones still get their alerts straight from APNs, so everything here is
-// Android-only for now (#31 adds the banner on iOS).
+// iPhones and iPads get their alerts straight from APNs, so apart from the
+// foreground setting in initAlertNotifications(), everything here is
+// Android-only. On iOS the picture is added by the Notification Service
+// Extension in ios/NotificationService (#17), and #31 adds the banner.
 
 final _plugin = FlutterLocalNotificationsPlugin();
 
@@ -38,6 +40,12 @@ Stream<String?> get alertTaps => _taps.stream;
 /// phone's settings before the first alert, and shows alerts that arrive while
 /// the app is open (Android never shows those on its own).
 Future<void> initAlertNotifications() async {
+  if (Platform.isIOS) {
+    // iOS draws our alerts itself, but hides one that arrives while the app is
+    // open unless the app opts in (#17). The setting is saved by iOS.
+    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(alert: true, sound: true);
+    return;
+  }
   if (!Platform.isAndroid) return;
   await _plugin.initialize(
     settings: _settings,
