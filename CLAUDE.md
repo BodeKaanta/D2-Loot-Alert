@@ -496,7 +496,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Images:** both are downloaded in parallel with a timeout. If one fails, the alert shows without it.
   - **Channel:** our own "Bonus drops", high importance so alerts pop up. The manifest's `default_notification_channel_id` points FCM's own notifications (console tests) at it too, instead of FCM's "Misc".
   - **Small icon:** still `@mipmap/ic_launcher`, as before. When the friend's app icon arrives (#10), make a monochrome notification icon from it.
-  - **iOS:** everything in `notifications.dart` is Android-only for now. Check in #17/#31 that iOS taps still reach `onMessageOpenedApp` with `flutter_local_notifications` installed.
+  - **iOS:** everything in `notifications.dart` is Android-only, apart from the foreground setting. iOS taps reach `onMessageOpenedApp` (see iOS > Notification delegate).
 - **Performance (#20):**
   - **Judge smoothness in a release build** (`flutter run --release`). Debug builds scroll noticeably worse and aren't representative.
   - **Banners decode at their on-screen size** (`cacheWidth` in `BannerImage`, from `LayoutBuilder`) instead of Bungie's ~1920 px originals. `BoxFit.cover` on the taller grid cells is accounted for.
@@ -550,11 +550,42 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
    flutterfire configure --project=d2-loot-alert --platforms=android,ios --android-package-name=com.id0.d2lootalert --ios-bundle-id=com.id0.d2lootalert --yes
    ```
    It reuses the apps registered in #8, so nothing new gets created in Firebase.
+   - **On the Mac** it edits the Xcode project with Ruby's `xcodeproj` library, which Homebrew's Ruby doesn't have (`cannot load such file -- xcodeproj`). Homebrew's CocoaPods bundles it, so run it with `GEM_HOME=/opt/homebrew/Cellar/cocoapods/<version>/libexec GEM_PATH=$GEM_HOME:/opt/homebrew/lib/ruby/gems/<ruby version>` in front. It adds `GoogleService-Info.plist` to the Runner target in `project.pbxproj` (commit that) and the iOS app to `app/firebase.json`.
+   - The FlutterFire CLI installs to `~/.pub-cache/bin`, which has to be on `PATH`.
    - Copying the files from the PC works too.
 5. **Mac / iOS extras** (#17):
-   - Install Xcode and CocoaPods. Flutter runs `pod install` on the first iOS build.
-   - Set the signing team in Xcode (Runner target → Signing & Capabilities).
-   - The push key, capabilities and Notification Service Extension are all in #17.
+   - Install Xcode. **No CocoaPods needed:** the project uses Swift Package Manager (already in the Xcode project from the template), so there's no `Podfile`. The first build fetches Firebase's Swift packages, which takes a few minutes.
+   - Sign Xcode into the paid Apple Developer account (Xcode → Settings → Accounts). A free personal team can't sign the Push Notifications capability.
+   - Open `app/ios/Runner.xcworkspace` and set the **Team** on both the **Runner** and **NotificationService** targets (Signing & Capabilities, "Automatically manage signing" on). That registers both bundle IDs with Apple and writes `DEVELOPMENT_TEAM` into `project.pbxproj`, which gets committed (a team ID isn't secret).
+   - The APNs key steps are in iOS below.
+
+### iOS (#17)
+
+- **Minimum iOS 15.0**, because Firebase's iOS SDK 12 requires it. Flutter set it itself on the first build.
+- **Flutter version:** the Mac has Flutter 3.47, the PC 3.44. On the Mac, `flutter pub get` rewrites a few SDK-pinned entries in `pubspec.lock` (`meta`, `matcher`, `test_api`, `vector_math`) and adds an `analyzer: exclude:` block to `analysis_options.yaml`. Don't commit that churn from the Mac; upgrade the PC's Flutter first if the two need to match.
+- **`Package.resolved`** (two identical copies under `Runner.xcworkspace` and `Runner.xcodeproj`) pins Firebase's Swift packages, like `pubspec.lock` does for Dart. Commit them.
+- **Push setup:**
+  - `Runner/Runner.entitlements` has `aps-environment = development`. Xcode switches it to production when signing for TestFlight or the App Store.
+  - `Info.plist` has the `remote-notification` background mode.
+  - **APNs key** (done once, in the Apple Developer account): Certificates, IDs & Profiles → Keys → **+** → name it → tick **Apple Push Notifications service (APNs)** → pick **Sandbox & Production** → Register → **Download** the `.p8` (only downloadable once; keep it in a password manager, never in the repo). Note the **Key ID**, and the **Team ID** (top right of the developer site).
+  - **Upload it to Firebase:** console → ⚙ Project settings → **Cloud Messaging** → Apple app configuration → `com.id0.d2lootalert` → **APNs Authentication Key**. It has two rows, development and production: **Upload the same `.p8` to both**, each time with its Key ID and the Team ID. Ignore the APNs Certificates section (the older method).
+  - Debug and Xcode-run builds use Apple's **sandbox** push servers, TestFlight uses production. One "Sandbox & Production" key covers both.
+- **`push.dart` waits for the APNs token** (up to 10 s) before a topic change. FCM reaches an iPad through APNs, and `firebase_messaging` throws `apns-token-not-set` instead of waiting when the token hasn't arrived yet, which a bell tapped right after launch could hit.
+- **Foreground alerts:** iOS hides an alert that arrives while the app is open unless asked, so `initAlertNotifications()` calls `setForegroundNotificationPresentationOptions` on iOS.
+- **Notification delegate:** `flutter_local_notifications` only takes over iOS's notification delegate when it's initialized, and the app only initializes it on Android. So `firebase_messaging` keeps the delegate, and taps reach `onMessageOpenedApp`. **Don't add** the plugin README's `UNUserNotificationCenter.current().delegate = self` line to `AppDelegate.swift`.
+- **Notification Service Extension** (`ios/NotificationService/`, bundle ID `com.id0.d2lootalert.NotificationService`): iOS runs it for each push with `mutable-content`, before showing it. It downloads `fcm_options.image` (the weapon or armor icon) and attaches it, which iOS shows as the thumbnail. Plain Swift, no Firebase SDK.
+  - Raid alerts have no `image` (only a `banner`), so on iOS they show without a picture until #31.
+  - Its version comes from Flutter's xcconfigs (`FLUTTER_BUILD_NAME`/`NUMBER`), so it always matches the app's, which App Store uploads require.
+  - **"Embed Foundation Extensions" must stay before "Thin Binary"** in Runner's build phases, or Xcode reports a dependency cycle (a known Flutter issue).
+- **Running on the iPad:**
+  1. Plug it in, tap **Trust** on the iPad, and turn on **Developer Mode** (Settings → Privacy & Security → Developer Mode; it restarts).
+  2. `flutter devices` lists it. Then `flutter run -d <id>` (debug) or `flutter run --release -d <id>`.
+  3. **A debug build only runs while `flutter run` is attached.** Opening it later from the home screen fails. For a build that keeps working on its own, use `--release`.
+  4. **But a release build installed from the Mac gets no pushes** (found 2026-11-07). `firebase_messaging` tells FCM the APNs token is "production" in any release build (`#ifdef DEBUG` in its plugin), while a build installed from Xcode or `flutter run` is development-signed, so its token is a sandbox one. FCM then sends through the wrong Apple server and the alert silently disappears.
+     - **Test pushes with a debug build** (`flutter run -d <id>`, left attached). The first one reached the iPad on 2026-11-07, sent from a Firebase console campaign to `weapon_fair-judgment`.
+     - **Console campaigns can take a minute or more to arrive.** Wait before deciding a test failed.
+     - Builds signed for production match: TestFlight, App Store, or an ad hoc build. For Bode's own iPad to get alerts day to day, use TestFlight (#10) like the friend.
+  5. The About screen's test-push button only exists in debug builds (see the push test below). The Firebase console's **Notification image** field sets `fcm_options.image` and `mutable-content`, so a console test also checks the extension.
 
 ### Running and testing the app on Bode's PC
 
@@ -588,7 +619,7 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #28 | Bug: alerts arrive late and several collapse into one (Android high priority) | S | Done |
 | #30 | Custom notifications on Android: weapon icon collapsed, activity banner expanded | M | Done |
 | #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | Backlog |
-| #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Backlog |
+| #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | In progress |
 | #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | Done |
 | #34 | Today: READY TO FARM section with what you watch that's available now | S | Done |
@@ -608,10 +639,13 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-10-27, everything through #36 is merged into `main`, and `main` matches what's deployed.
+As of 2026-11-04, everything through #38 is merged into `main`, and `main` matches what's deployed.
 
-- **In progress: #38** (branch `task_38_readme`): the public README rewritten for the working Android app, with screenshots in `docs/screenshots/`.
-  - **#36 checked:** the 18:34 UTC Force run that Tuesday wrote `xur: []`, and TODAY's XÛR section went away (Bode). His return is first checked at Friday's 17:07 UTC run.
+- **In progress: #17** (branch `task_17_ios_setup`), on Bode's Mac: push entitlement, background mode, APNs-token wait, iOS foreground alerts and the Notification Service Extension. A simulator build and an unsigned device build both work.
+  - **Done on 2026-11-07:** the APNs key is uploaded to Firebase (development and production rows), `flutterfire configure` has run on the Mac, and the team (`X85MDRLFL6`) is set on both targets. A signed device build works, and the app carries `aps-environment`.
+  - **Still to do:** run it on the iPad (plug in, Trust, Developer Mode), then a test push with an image.
+  - The Mac's `gh` login lacks the `project` scope, so board changes from the Mac need `gh auth refresh -s project` first.
+- **#36 checked:** the 18:34 UTC Force run that Tuesday wrote `xur: []`, and TODAY's XÛR section went away (Bode). His return is first checked at Friday's 17:07 UTC run.
 - **#13 (Xûr) was checked on the Pixel on 2026-10-19:** Xûr alerts for belled pieces arrived. The XÛR screens, card art and TODAY section looked right (Bode).
   - **Still to watch:** the first Friday arrival (17:07 UTC run). The Tuesday departure was answered by #36.
 - **#30 was tested on 2026-10-19 with the forced-Doze recipe,** with the app's process stopped (`am kill`) so alerts start it from cold.
@@ -712,6 +746,8 @@ As of 2026-10-27, everything through #36 is merged into `main`, and `main` match
 - **2026-10-20:** **READY TO FARM tops TODAY** (#34), with copies of everything watched that's available now: weapons' activities, featured raids and dungeons, and Xûr's armor.
   - The name was picked by Bode over WATCHING, ON YOUR LIST, FARM NOW and YOUR DROPS TODAY.
   - Copies, not moves, so the sections below stay complete.
+- **2026-11-04:** **iOS uses Swift Package Manager, not CocoaPods** (#17). The Flutter template already had it wired in, and it needs no Ruby setup on the Mac.
+- **2026-11-04:** **The iOS image extension is plain Swift** (#17), not Firebase's `FIRMessagingExtensionHelper`. It's ~40 lines and keeps the Firebase SDK out of a second target.
 - **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
   - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.
   - **Topics** are `xur_<name slug>`, like weapons (#26 showed hashes aren't stable).
