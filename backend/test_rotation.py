@@ -105,6 +105,22 @@ class Alerts(unittest.TestCase):
     def test_join_names(self):
         self.assertEqual(alerts.join_names(["A", "B", "C"]), "A, B and C")
 
+    def test_ios_weapon_alert_shows_the_icon_collapsed_and_the_banner_expanded(self):
+        alert = {"image": "https://example/icon.png", "banner": "https://example/gambit.jpg"}
+        self.assertEqual(alerts.ios_options(alert),
+                         {"thumbnail": "https://example/icon.png", "category": "banner"})
+
+    def test_ios_raid_alert_uses_its_banner_for_both(self):
+        alert = {"image": None, "banner": "https://example/last-wish.jpg"}
+        self.assertEqual(alerts.ios_options(alert),
+                         {"thumbnail": "https://example/last-wish.jpg", "category": "banner"})
+
+    def test_ios_alert_without_a_banner_expands_the_normal_way(self):
+        self.assertEqual(alerts.ios_options({"image": "https://example/icon.png", "banner": None}),
+                         {"thumbnail": "https://example/icon.png", "category": None})
+        self.assertEqual(alerts.ios_options({"image": None, "banner": None}),
+                         {"thumbnail": None, "category": None})
+
 
 def previews(*item_hashes):
     """A live activity whose preview rewards are these items."""

@@ -4,6 +4,8 @@ Read this whole file before doing anything in this repo. It is the shared memory
 
 **Keep it current.** When you make a decision, learn something about the API, finish a phase or change the plan, update the matching section on your working branch as part of that task. Add decisions to the [decision log](#decision-log) with the date.
 
+**A new chat must be able to pick up from this file alone** (Bode, 2026-11-08). Before every commit and PR, check that [Current status](#current-status) and the [Roadmap](#roadmap) say what's in progress, what's waiting on Bode, what's deployed, and what comes next.
+
 ---
 
 ## Working rules (non-negotiable)
@@ -281,6 +283,7 @@ Flutter app (Android + iOS)
 | `firebase.json`, `.firebaserc` | Firebase CLI config: functions source and runtime, rules file, default project `d2-loot-alert` |
 | `firestore.rules` | Firestore security rules, deployed with `firebase deploy --only firestore:rules` |
 | `app/` | Flutter app (#8 onward) |
+| `app/ios/NotificationService/`, `app/ios/NotificationContent/` | The iOS notification extensions, in Swift: the thumbnail (#17) and the expanded banner (#31). See App setup > iOS. |
 
 ### Firebase project
 
@@ -330,6 +333,7 @@ Flutter app (Android + iOS)
   - From Git Bash, load the env vars with `set -a; source <(tr -d '\r' < phase0/.env); set +a`.
 - **Deploy** (from the repo root):
   1. One time: `python -m venv backend/venv` then `backend/venv/Scripts/pip install -r backend/requirements.txt`. The CLI reads the functions from this venv.
+     - **On the Mac** (set up 2026-11-08): `brew install python@3.11` (macOS's own `python3` is 3.9), then `python3.11 -m venv backend/venv` and `backend/venv/bin/pip install -r backend/requirements.txt`. Note `bin/`, not `Scripts/`.
   2. `firebase deploy --only functions`
 - **Deploy gotchas** (all from the first deploy on 2026-10-17):
   - **"Failed to list functions" right after Firebase enables the Cloud Functions API** is a propagation delay. Wait a minute or two and retry.
@@ -385,7 +389,7 @@ Flutter app (Android + iOS)
   - **Not the generic Raid symbol.** Raid definitions do carry one, a small white glyph, but it's Bungie interface art, which the art rules exclude. It also disappears on a light background, and dungeons don't have one.
 - **How alerts reach the phone** (#30):
   - **Android gets data messages** (no `notification` part), and the app draws them with `flutter_local_notifications`. FCM's own notifications have one `image`, which it uses both collapsed and expanded, so they can't show two pictures.
-  - **iPhones get a normal alert** from the message's `apns` part (`aps.alert`). #31 adds the banner on iOS.
+  - **iPhones get a normal alert** from the message's `apns` part (`aps.alert`). The app's two extensions add the pictures: the thumbnail (#17) and the expanded banner (#31). See App setup > iOS.
   - **App builds from before #30 show nothing on Android,** since they don't draw data messages. Install the new app before or with deploying #30's backend.
 - **Data payload** (strings only; empty fields are left out, see `fcm_data()`):
   - weapons: `kind=weapon`, `weaponId`, `activityIds` (comma-separated group ids)
@@ -402,7 +406,7 @@ Flutter app (Android + iOS)
 - **Never twice:** `meta/state` stores `sentResetId` + `sentWeaponTopics` and `sentWeekId` + `sentRaidTopics` + `sentXurTopics`.
   - **Week ID** is the date of the most recent Tuesday 17:00 UTC reset.
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
-- **Images on iOS** need a Notification Service Extension in the app (#17). The backend already sets `mutable-content` and `fcm_options.image` on APNs.
+- **Images on iOS** (#17, #31): the backend sets `mutable-content` and `fcm_options.image` (the icon, or a raid's banner) for the thumbnail, and `aps.category = "banner"` for the expanded banner. `ios_options()` in `alerts.py` picks them.
 - **Android priority is `high`** (#28). Without it, the 2026-10-18 alerts sat with FCM while the Pixel was in Doze. FCM accepted 12, but only one (Hammerhead) arrived, 50 minutes late, when the phone was picked up.
   - **Notification messages are always collapsible** and share one default collapse key (the app's package name), so FCM keeps only the newest one it's holding for a device.
   - High priority is delivered right away, even in Doze, so nothing waits to be collapsed. It's meant for messages that show a notification, which ours always do.
@@ -419,7 +423,7 @@ Flutter app (Android + iOS)
   4. Force run the scheduler job. Then read the post times as above.
   5. Undo: `adb shell dumpsys deviceidle unforce` and `adb shell dumpsys battery reset`.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
-- **Tests:** run `python -m unittest discover backend` from the repo root (33 tests, standard library only). They cover the reset and week math, alert wording and data, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
+- **Tests:** run `python -m unittest discover backend` from the repo root (36 tests, standard library only). They cover the reset and week math, alert wording and data, the iOS thumbnail and category, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
 - **Watch types are simplified** to "weapon, in any activity and any version", "raid or dungeon", and "exotic armor Xûr sells" (#13). A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
@@ -443,8 +447,8 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   | `theme.dart` | `AppColors`, `AppText`, `buildTheme()` |
   | `models.dart` | Defensive parsing of the Firestore docs; `groupByCategory()`; `buildCategoryLoot()`; `portalCategories` |
   | `reset.dart` | Next daily reset and countdown text |
-  | `push.dart` | Permission, topic subscribe and unsubscribe, `weaponTopic()` / `raidTopic()` (must match `backend/alerts.py`) |
-  | `notifications.dart` | Draws Android alerts (#30): the background handler, foreground alerts, the "Bonus drops" channel, and alert taps |
+  | `push.dart` | Permission, topic subscribe and unsubscribe (waiting for the APNs token on iOS, #17), `weaponTopic()` / `raidTopic()` / `xurTopic()` (must match `backend/alerts.py`) |
+  | `notifications.dart` | Draws Android alerts (#30): the background handler, foreground alerts, the "Bonus drops" channel, and alert taps. On iOS it only turns on foreground alerts (#17). |
   | `watch_store.dart` | The watch list (see Watching below), plus `WatchScope` |
   | `screens/` | `home_screen` (tabs and push taps), `today_screen`, `loot_screen`, `category_screen`, `xur_screen` (#13), `raids_screen`, `about_screen` |
   | `widgets/` | Section header, banner image, activity card with `WeaponRow`/`WeaponBell`/`ItemRow`/`ItemTile`, featured grid and card with `RaidBell`, `ArmorRow`/`ArmorBell` (#13), `LinkCard` (banner card that opens a screen), reset countdown, `WatchBell`, `AppTabBar`, `PageHeader` |
@@ -574,9 +578,20 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 - **Foreground alerts:** iOS hides an alert that arrives while the app is open unless asked, so `initAlertNotifications()` calls `setForegroundNotificationPresentationOptions` on iOS.
 - **Notification delegate:** `flutter_local_notifications` only takes over iOS's notification delegate when it's initialized, and the app only initializes it on Android. So `firebase_messaging` keeps the delegate, and taps reach `onMessageOpenedApp`. **Don't add** the plugin README's `UNUserNotificationCenter.current().delegate = self` line to `AppDelegate.swift`.
 - **Notification Service Extension** (`ios/NotificationService/`, bundle ID `com.id0.d2lootalert.NotificationService`): iOS runs it for each push with `mutable-content`, before showing it. It downloads `fcm_options.image` (the weapon or armor icon) and attaches it, which iOS shows as the thumbnail. Plain Swift, no Firebase SDK.
-  - Raid alerts have no `image` (only a `banner`), so on iOS they show without a picture until #31.
+  - Raid alerts have no `image`, so the backend sends their `banner` as `fcm_options.image` instead (#31), like Android's raid thumbnail.
   - Its version comes from Flutter's xcconfigs (`FLUTTER_BUILD_NAME`/`NUMBER`), so it always matches the app's, which App Store uploads require.
   - **"Embed Foundation Extensions" must stay before "Thin Binary"** in Runner's build phases, or Xcode reports a dependency cycle (a known Flutter issue).
+- **Notification Content Extension** (#31, `ios/NotificationContent/`, bundle ID `com.id0.d2lootalert.NotificationContent`): draws the **expanded** alert (long-press, or pull down on the lock screen). It shows the `banner` from the alert's data at 16:9, with iOS's own title and body under it, like Android's expanded alert (#30). Collapsed, the alert keeps the Service Extension's thumbnail.
+  - **iOS picks it by category.** `backend/alerts.py` sets `aps.category = "banner"` (`IOS_BANNER_CATEGORY`, chosen in `ios_options()`) only when the alert has a banner. The same name is in the extension's `Info.plist` (`UNNotificationExtensionCategory`), and `AppDelegate.swift` registers it at launch.
+  - FCM passes the message's `data` fields to iOS as extra payload keys, which is how the extension reads `banner`.
+  - If the banner is missing or fails to download (10 s timeout), the custom area shrinks to nothing and the alert expands the normal way. A newer alert arriving in an open expanded view replaces the banner, and a slower old download can't overwrite it.
+  - **The category is registered when the app launches,** so open a newly installed build once before relying on the banner view.
+  - **`setNotificationCategories` replaces all categories.** Only `AppDelegate.swift` may call it. Initializing `flutter_local_notifications` on iOS would also call it and silently remove `banner`; add any new categories in `AppDelegate.swift` instead.
+  - Known and accepted: a raid's banner is downloaded twice, once as the thumbnail and again when expanded. Raid alerts are weekly.
+  - **Console tests can't check it:** Firebase console campaigns can't set a category. Test with a real backend alert.
+  - **It links `UserNotifications` and `UserNotificationsUI` explicitly** (`OTHER_LDFLAGS` on the target). Swift's automatic linking dropped `UserNotificationsUI`, because the code only conforms to its protocol and never calls it. Then iOS couldn't find the extension's context class and the extension crashed on launch (SIGTRAP, "Unable to find NSExtensionContextClass"), so the long-press showed nothing (2026-11-08). Check with `otool -L` on the built `NotificationContent.appex/NotificationContent`.
+  - **Debugging an extension on the iPad:** `sudo /usr/bin/log collect --device-udid <UDID> --last 6h --output <file>.logarchive` (needs `sudo`, so Bode runs it), then `/usr/bin/log show <file> --predicate 'process == "NotificationContent"'`. In zsh, plain `log` is a shell builtin, so use the full path. SpringBoard's `Posting notification … category: banner` line shows what the backend sent.
+  - Both extensions were added to the Xcode project with the `xcodeproj` Ruby library (run like `flutterfire configure`, above). `new_target` also links `Foundation.framework` at a hardcoded SDK path; remove that.
 - **Running on the iPad:**
   1. Plug it in, tap **Trust** on the iPad, and turn on **Developer Mode** (Settings → Privacy & Security → Developer Mode; it restarts).
   2. `flutter devices` lists it. Then `flutter run -d <id>` (debug) or `flutter run --release -d <id>`.
@@ -584,7 +599,12 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
   4. **But a release build installed from the Mac gets no pushes** (found 2026-11-07). `firebase_messaging` tells FCM the APNs token is "production" in any release build (`#ifdef DEBUG` in its plugin), while a build installed from Xcode or `flutter run` is development-signed, so its token is a sandbox one. FCM then sends through the wrong Apple server and the alert silently disappears.
      - **Test pushes with a debug build** (`flutter run -d <id>`, left attached). The first one reached the iPad on 2026-11-07, sent from a Firebase console campaign to `weapon_fair-judgment`.
      - **Console campaigns can take a minute or more to arrive.** Wait before deciding a test failed.
-     - Builds signed for production match: TestFlight, App Store, or an ad hoc build. For Bode's own iPad to get alerts day to day, use TestFlight (#10) like the friend.
+     - Builds signed for production match: TestFlight, App Store, or an ad hoc build.
+     - **Ad hoc build for Bode's iPad** (what it runs day to day until TestFlight, #10): `flutter build ipa --release --export-method ad-hoc` in `app/`, then `xcrun devicectl device install app --device <UDID> <Runner.app>`, with `Runner.app` taken from the `Payload/` folder inside `build/ios/ipa/*.ipa` (unzip it).
+       - Xcode creates the ad hoc profile automatically. It only covers devices registered to the developer account (the iPad is), so it can't go to the friend. The 2026-11-07 profile expires 2027-09-04.
+       - Check it with `codesign -d --entitlements - --xml Payload/Runner.app`: `aps-environment` should be `production`.
+       - After installing over a development build, open the app and re-tap the bells, so the topics are tied to the new production push token.
+       - **Real-world check, 2026-11-08:** the 17:07 UTC reset alert reached the iPad with the weapon icon, with no Mac attached.
   5. The About screen's test-push button only exists in debug builds (see the push test below). The Firebase console's **Notification image** field sets `fcm_options.image` and `mutable-content`, so a console test also checks the extension.
 
 ### Running and testing the app on Bode's PC
@@ -618,8 +638,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #26 | Bug: duplicate weapon versions in Fireteam Ops, and missed alerts (weapons identified by name) | M | Done |
 | #28 | Bug: alerts arrive late and several collapse into one (Android high priority) | S | Done |
 | #30 | Custom notifications on Android: weapon icon collapsed, activity banner expanded | M | Done |
-| #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | Backlog |
-| #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | In progress |
+| #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | In review |
+| #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Done |
 | #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | Done |
 | #34 | Today: READY TO FARM section with what you watch that's available now | S | Done |
@@ -639,12 +659,13 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-11-04, everything through #38 is merged into `main`, and `main` matches what's deployed.
+As of 2026-11-08, everything through #17 is merged into `main`.
 
-- **In progress: #17** (branch `task_17_ios_setup`), on Bode's Mac: push entitlement, background mode, APNs-token wait, iOS foreground alerts and the Notification Service Extension. A simulator build and an unsigned device build both work.
-  - **Done on 2026-11-07:** the APNs key is uploaded to Firebase (development and production rows), `flutterfire configure` has run on the Mac, and the team (`X85MDRLFL6`) is set on both targets. A signed device build works, and the app carries `aps-environment`.
-  - **Still to do:** run it on the iPad (plug in, Trust, Developer Mode), then a test push with an image.
-  - The Mac's `gh` login lacks the `project` scope, so board changes from the Mac need `gh auth refresh -s project` first.
+- **#31 is finished and PR #41 is waiting for Bode to merge** (branch `task_31_ios_notification_banner`): the Notification Content Extension and the backend's `aps.category`. Reviewed with the code-review skill on 2026-11-08; its findings were fixed or documented.
+  - **The deployed backend runs this branch, not `main`** (deployed from the Mac on 2026-11-08 with Bode's OK, before review, to test with a real reset). Once the PR is merged, `main` matches it again; no redeploy is needed.
+  - **If the PR is merged:** mark #31 Done in the roadmap, and change this section to say `main` matches what's deployed.
+  - The 2026-11-08 reset alerts arrived with `category: banner`, but the extension crashed on long-press (frameworks not linked, fixed the same day). With the fixed ad hoc build, long-pressing those alerts showed the activity banner with the title and body under it (Bode, 2026-11-08). Still true after the code-review fixes (timeout, stale downloads, background decoding).
+- **#17 (iOS setup) is done.** Bode's iPad runs an ad hoc build (see iOS > Running on the iPad), and real reset alerts arrive with the weapon icon (2026-11-08).
 - **#36 checked:** the 18:34 UTC Force run that Tuesday wrote `xur: []`, and TODAY's XÛR section went away (Bode). His return is first checked at Friday's 17:07 UTC run.
 - **#13 (Xûr) was checked on the Pixel on 2026-10-19:** Xûr alerts for belled pieces arrived. The XÛR screens, card art and TODAY section looked right (Bode).
   - **Still to watch:** the first Friday arrival (17:07 UTC run). The Tuesday departure was answered by #36.
@@ -656,7 +677,8 @@ As of 2026-11-04, everything through #38 is merged into `main`, and `main` match
   - The run started at 06:44:15 UTC, and all 3 watched focus weapons were posted between 06:45:06 and 06:45:08, while the phone was still idle.
   - On 2026-10-18 the same situation gave one alert, 50 minutes late.
 
-- **Backend:** the Cloud Function `daily_rotation` is deployed from `main`'s `backend/`. It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts.
+- **Backend:** the Cloud Function `daily_rotation` (deployed from #31's branch, see above). It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts. It can be deployed from Bode's PC or Mac.
+- **iOS app:** works end to end on Bode's iPad (ad hoc build): Today, Loot and Raids & Dungeons, watch bells, and alerts with the icon collapsed and the banner expanded. Not on the friend's iPhone yet; that needs TestFlight (#10).
 - **Android app:** works end to end on Bode's Pixel.
   - Today, Loot and Raids & Dungeons tabs, watch bells with instant taps, and the watch list.
   - Use **`flutter run --release`** to judge how it feels; debug builds are slower.
@@ -668,11 +690,11 @@ As of 2026-11-04, everything through #38 is merged into `main`, and `main` match
   - With #30, tapping an alert opens the right tab: weapon → Today, raid → Raids & Dungeons (Bode, 2026-10-19).
   - A normal reset with #28 and #30 (2026-10-19, 17:07 UTC): every alert looked right (Bode).
 - **Next tasks, in suggested order:**
-  1. **#17** iOS on Bode's Mac. It blocks the friend, the iOS tester. Start with CLAUDE.md > "App setup on a new machine". Bode has no Mac at hand as of 2026-10-19.
-  2. **#31** the iOS version of the custom notifications, after #17.
-  3. **#10** release. It needs #17 and the friend's app icon (brief: "D2 Loot Alert – App Icon Brief", a Claude Doc Bode exported as PDF).
+  1. **#10** release: Android APK and iOS TestFlight, so the friend can install it. It needs the friend's app icon (brief: "D2 Loot Alert – App Icon Brief", a Claude Doc Bode exported as PDF). TestFlight builds are production-signed, so push works like the ad hoc build.
+  2. The "Project page and source code" link on About plus `.github/FUNDING.yml` (Decision log, 2026-10-27). Not a task yet; discuss with Bode first.
 - **Keep an eye on:**
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
+  - **The iPad's ad hoc build expires 2027-09-04.** Rebuild and reinstall before then (iOS > Running on the iPad), or move the iPad to TestFlight with #10.
   - **Banner images don't retry.** If one fails to download once (seen on LOOT on 2026-10-27: the Solo, Fireteam and Arena Ops cards stayed black), it stays blank until the app restarts. The links were fine. A retry in `BannerImage` would fix it; not a task yet.
   - "Still open (minor)" above.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
@@ -748,6 +770,7 @@ As of 2026-11-04, everything through #38 is merged into `main`, and `main` match
   - Copies, not moves, so the sections below stay complete.
 - **2026-11-04:** **iOS uses Swift Package Manager, not CocoaPods** (#17). The Flutter template already had it wired in, and it needs no Ruby setup on the Mac.
 - **2026-11-04:** **The iOS image extension is plain Swift** (#17), not Firebase's `FIRMessagingExtensionHelper`. It's ~40 lines and keeps the Firebase SDK out of a second target.
+- **2026-11-08:** **iOS alerts match Android's** (#31): icon collapsed, banner expanded, through a Notification Content Extension picked by the `banner` category. Raids use their banner for both. Chosen over the simpler "banner for both" on weapons too, because the collapsed alert should show which weapon it is.
 - **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
   - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.
   - **Topics** are `xur_<name slug>`, like weapons (#26 showed hashes aren't stable).

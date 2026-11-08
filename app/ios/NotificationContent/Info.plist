@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>NotificationContent</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<!-- Same version as the app (from pubspec.yaml), which App Store uploads require. -->
+	<key>CFBundleShortVersionString</key>
+	<string>$(FLUTTER_BUILD_NAME)</string>
+	<key>CFBundleVersion</key>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<!-- iOS uses this extension for alerts with this category. Must match
+			     IOS_BANNER_CATEGORY in backend/alerts.py and AppDelegate.swift. -->
+			<key>UNNotificationExtensionCategory</key>
+			<string>banner</string>
+			<!-- Height / width of the custom area: 9/16, so a 16:9 banner fits
+			     before it loads and nothing jumps. -->
+			<key>UNNotificationExtensionInitialContentSizeRatio</key>
+			<real>0.5625</real>
+			<!-- Keep iOS's own title and body under the banner. -->
+			<key>UNNotificationExtensionDefaultContentHidden</key>
+			<false/>
+		</dict>
+		<!-- Makes this a Notification Content Extension: it draws the expanded alert. -->
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.usernotifications.content-extension</string>
+		<!-- The view is built in code, so no storyboard. -->
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).NotificationViewController</string>
+	</dict>
+</dict>
+</plist>
