@@ -108,6 +108,28 @@ def xur_alerts(snapshot):
     } for armor in snapshot.get("xur", [])]
 
 
+# iOS draws an expanded alert with the app's Notification Content Extension (#31)
+# when the alert has this category. Must match UNNotificationExtensionCategory in
+# app/ios/NotificationContent/Info.plist and the category AppDelegate.swift registers.
+IOS_BANNER_CATEGORY = "banner"
+
+
+def ios_options(alert):
+    """The extra parts of an alert for iPhones and iPads (#17, #31).
+
+    - thumbnail: the picture the Notification Service Extension attaches, shown
+      when the alert is collapsed. The weapon or armor icon, or for raids (which
+      have no icon) their banner, like on Android (#30).
+    - category: makes iOS show the banner with the Notification Content Extension
+      when the alert is expanded. Left out when there's no banner, so those alerts
+      expand the normal way.
+    """
+    return {
+        "thumbnail": alert["image"] or alert["banner"],
+        "category": IOS_BANNER_CATEGORY if alert["banner"] else None,
+    }
+
+
 def fcm_data(alert):
     """The alert's FCM data: what the app needs to open the right tab, plus what
     it needs to draw the notification on Android (#30).
@@ -132,7 +154,7 @@ def send(alerts):
 
     messages = []
     for alert in alerts:
-        image = alert["image"]
+        ios = ios_options(alert)
         messages.append(messaging.Message(
             topic=alert["topic"],
             # No `notification` part: that makes it a data message on Android, so the
@@ -145,11 +167,14 @@ def send(alerts):
             apns=messaging.APNSConfig(
                 payload=messaging.APNSPayload(aps=messaging.Aps(
                     alert=messaging.ApsAlert(title=alert["title"], body=alert["body"]),
-                    # iOS only shows an image if the app has a Notification Service
-                    # Extension (#17), and only runs it when mutable-content is set.
-                    mutable_content=bool(image),
+                    # iOS only runs the app's Notification Service Extension (#17),
+                    # which attaches the thumbnail, when mutable-content is set.
+                    mutable_content=bool(ios["thumbnail"]),
+                    # The expanded banner view (#31). It reads the banner's URL from
+                    # the data above, which FCM passes to iOS as extra payload keys.
+                    category=ios["category"],
                 )),
-                fcm_options=messaging.APNSFCMOptions(image=image) if image else None,
+                fcm_options=messaging.APNSFCMOptions(image=ios["thumbnail"]) if ios["thumbnail"] else None,
             ),
         ))
 
