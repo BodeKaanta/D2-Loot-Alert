@@ -27,7 +27,9 @@ class AboutScreen extends StatelessWidget {
             'Destiny imagery © Bungie, Inc. Weapon icons and activity art come from the Bungie.net API.',
             style: AppText.body,
           ),
-          // The app icon artist's credit goes here once he decides how to be named (#10).
+          const SizedBox(height: 12),
+          // A link can be added here if Owen wants one (#42).
+          const Text('App icon by Owen Hartman.', style: AppText.body),
           const SizedBox(height: 12),
           const Text('Font: Inter by Rasmus Andersson (SIL Open Font License 1.1).', style: AppText.body),
           const SizedBox(height: 12),
