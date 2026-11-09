@@ -29,6 +29,23 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4 # generates the app icons below (#42); never ships in the app
+
+# App icon by Owen Hartman (#42). To change it, replace assets/icon/app_icon.png and
+# run `dart run flutter_launcher_icons` in app/. That rewrites the iOS asset catalog
+# and Android's mipmap-* folders. The Android notification icon is separate
+# (android/app/src/main/res/drawable-*/ic_notification.png, see CLAUDE.md).
+flutter_launcher_icons:
+  image_path: assets/icon/app_icon.png
+  ios: true
+  remove_alpha_ios: true # App Store Connect rejects icons with an alpha channel
+  android: true # replaces ic_launcher, the name AndroidManifest.xml already uses
+  # Android 8+ adaptive icon: launchers crop it to their own shape (often a circle).
+  adaptive_icon_background: "#323282" # the artwork's own background colour
+  adaptive_icon_foreground: assets/icon/app_icon.png
+  # 17% padding per side leaves the artwork at 66% of the canvas, so its corners stay
+  # inside the circle every launcher keeps visible (the default 16% clips them slightly).
+  adaptive_icon_foreground_inset: 17
 
 flutter:
   uses-material-design: true # Material icons (info, refresh...)

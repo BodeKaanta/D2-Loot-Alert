@@ -17,7 +17,10 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 final _plugin = FlutterLocalNotificationsPlugin();
 
 const _settings = InitializationSettings(
-  android: AndroidInitializationSettings('@mipmap/ic_launcher'), // the small status bar icon
+  // The small status bar icon (#42). Android only uses its shape and paints it white,
+  // so it's a white silhouette of the app icon (res/drawable-*/ic_notification.png).
+  // The app icon itself is a solid square and would show as a plain white square.
+  android: AndroidInitializationSettings('@drawable/ic_notification'),
 );
 
 /// Our own channel instead of FCM's "Misc". High importance makes alerts pop up.
