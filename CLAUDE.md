@@ -104,9 +104,9 @@ A small Android + iOS app for Bode and a friend:
 
 **Distribution:**
 - **Android:** Bode sideloads a signed APK.
-- **iOS:** TestFlight first, for Bode's friend.
-  - TestFlight builds expire after 90 days.
-  - If the friend keeps using the app, move to an App Store release so nobody has to reinstall every 90 days. That needs a privacy policy; Claude helps write it.
+- **iOS: straight to the App Store** (Bode, 2026-11-08; #10). Uploading the build for review also makes it available in TestFlight to internal testers right away, so Bode's roommate can try it on an iPhone while Apple reviews it.
+  - It needs a privacy policy and a support page (#44); Claude helps write them.
+  - Bode's iPad runs an ad hoc build until then (App setup > iOS).
 
 No user accounts and no login. The README holds the public-facing scope.
 
@@ -431,7 +431,8 @@ Flutter app (Android + iOS)
 
 Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, and the app ID is `com.id0.d2lootalert` on both platforms. The display name is "D2 Loot Alert".
 
-- **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17, `shared_preferences` ^2.5 (added in #9 for the watch list), `flutter_local_notifications` ^22.3.2 (added in #30 to draw Android alerts).
+- **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17, `shared_preferences` ^2.5 (added in #9 for the watch list), `flutter_local_notifications` ^22.3.2 (added in #30 to draw Android alerts). Dev only: `flutter_launcher_icons` ^0.14.4 (added in #42 to generate the app icons; see Design system > App icon).
+  - **Adding a package on the Mac** (Flutter 3.47) also bumps four SDK-pinned entries in `pubspec.lock` (`matcher`, `meta`, `test_api`, `vector_math`). Before committing, set those four back to `main`'s versions, so the lockfile only adds the new package's entries (done in #42).
   - `flutter_local_notifications` needs core library desugaring in `android/app/build.gradle.kts` (`isCoreLibraryDesugaringEnabled` plus `desugar_jdk_libs` 2.1.4).
   - `getToken()` is deprecated in `firebase_messaging` 17 (replaced by `register()`/`onRegistered`). We don't need tokens, only topics.
   - **Pinned: `shared_preferences_android` 2.4.28** (`dependency_overrides` in `pubspec.yaml`, #21).
@@ -499,7 +500,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Foreground:** alerts that arrive while the app is open are drawn too, through `onMessage`.
   - **Images:** both are downloaded in parallel with a timeout. If one fails, the alert shows without it.
   - **Channel:** our own "Bonus drops", high importance so alerts pop up. The manifest's `default_notification_channel_id` points FCM's own notifications (console tests) at it too, instead of FCM's "Misc".
-  - **Small icon:** still `@mipmap/ic_launcher`, as before. When the friend's app icon arrives (#10), make a monochrome notification icon from it.
+  - **Small icon:** `@drawable/ic_notification`, a white silhouette of the app icon (#42; see Design system > App icon).
   - **iOS:** everything in `notifications.dart` is Android-only, apart from the foreground setting. iOS taps reach `onMessageOpenedApp` (see iOS > Notification delegate).
 - **Performance (#20):**
   - **Judge smoothness in a release build** (`flutter run --release`). Debug builds scroll noticeably worse and aren't representative.
@@ -531,8 +532,16 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Images only from the Bungie API:** weapon icons and activity `pgcrImage` banners, shown dimmed under a gradient. **No bungie.net concept art** for now; it's Bungie-owned, and Apple flags third-party IP.
   - **Bungie images only as *content*:** an item's icon, an activity's banner. **Never Bungie UI graphics or branding**, e.g. the Portal category emblems in `portalActivityGraphRootNodesWithIcons` or the Gambit snake shield. Category names are fine as plain text.
   - **The line** (agreed with Bode on 2026-10-17): looking *inspired by* Destiny is fine, since style, colors and layout aren't protected. Copying their graphics, logos, font or screens, implying it's official, or making money is not.
-  - **Credits** live on the About screen: "Destiny imagery © Bungie, Inc." plus the not-affiliated disclaimer and the Inter credit.
-  - **The app icon** will be made by Bode's artist friend (the iOS tester). No Bungie or Destiny logos. Specs: 1024×1024 PNG with no transparency, plus optional Android foreground and background layers. Credit him on the About screen if he wants; Bode will ask.
+  - **Credits** live on the About screen: "Destiny imagery © Bungie, Inc.", "App icon by Owen Hartman.", the Inter credit and the not-affiliated disclaimer. Owen may want a link added; Bode will ask.
+- **App icon** (#42): drawn by **Owen Hartman**, Bode's roommate. A purple dodecahedron with a magenta "!", on a solid `#323282` background. Original art, no Bungie graphics, though Destiny players may read the shape as an engram (fine under "inspired by"; keep it in mind for App Store review notes).
+  - **Source:** `app/assets/icon/app_icon.png` (1024×1024, fully opaque; it has an empty alpha channel that the iOS step removes). Not listed in `pubspec.yaml`, so it isn't bundled.
+  - **Generated with `flutter_launcher_icons`** (config at the bottom of `pubspec.yaml`): `dart run flutter_launcher_icons` in `app/` writes iOS's `AppIcon.appiconset` (alpha removed) and Android's `mipmap-*/ic_launcher.png`, plus the adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml`, `drawable-*/ic_launcher_foreground.png`, and `values/colors.xml` with the background colour).
+    - **Android's adaptive foreground inset is 17%,** which leaves the artwork at 66% of the canvas, so its corners stay inside the circle every launcher keeps. The default 16% clips them slightly.
+    - **Package bug (0.14.4): after running it, undo its change to `ios/Runner.xcodeproj/project.pbxproj`.** It sets `ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS` to `AppIcon` instead of `YES`. The icon name setting it meant to touch (`ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`) is already right.
+  - **Android notification icon** (`res/drawable-*/ic_notification.png`, 24–96 px): Android paints the status bar icon white using only its shape, so the solid app icon would be a plain white square. It's a white silhouette instead: the dodecahedron with the "!" cut out. Source: `app/assets/icon/notification_icon.png` (1024 px).
+    - Made on 2026-11-08 by turning the background and the "!" transparent and everything else white (the background found by a flood fill from the image's border, so blends inside the shape stay solid).
+    - To resize after a change: `sips -Z <px> notification_icon.png --out drawable-<dpi>/ic_notification.png` for mdpi 24, hdpi 36, xhdpi 48, xxhdpi 72, xxxhdpi 96.
+    - Used by `notifications.dart` (alerts the app draws) and by the manifest's `default_notification_icon` (notifications FCM draws itself).
 - **Known data quirks:**
   - Bungie's placeholder banner is replaced by real art where any exists (see Bungie API notes > Banners).
   - The Arena Ops and Solo Ops Quickplays share the same "Quickplay" banner, since the fallback works by name.
@@ -638,14 +647,17 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #26 | Bug: duplicate weapon versions in Fireteam Ops, and missed alerts (weapons identified by name) | M | Done |
 | #28 | Bug: alerts arrive late and several collapse into one (Android high priority) | S | Done |
 | #30 | Custom notifications on Android: weapon icon collapsed, activity banner expanded | M | Done |
-| #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | In review |
+| #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | Done |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Done |
-| #10 | Release: Android APK and iOS TestFlight (needs #17 and the friend's icon) | M | Backlog |
+| #42 | App icon on iOS and Android (with the Android notification icon), credit Owen Hartman on About | S | In progress |
+| #43 | Bug: banner images retry after a failed download | S | Backlog |
+| #44 | Privacy policy and support page on GitHub Pages, project link on About | S | Backlog |
+| #10 | Release: iOS App Store (needs #42, #43, #44) | M | Backlog |
+| #45 | Release: signed Android APK | S | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | Done |
 | #34 | Today: READY TO FARM section with what you watch that's available now | S | Done |
 | #36 | Bug: Xûr's stock keeps showing (and re-alerting) after he leaves on Tuesday | S | Done |
-| #38 | Update the README now that the Android app works | S | In progress |
-| later | Privacy policy + App Store release, if the friend keeps using it | — | Not created |
+| #38 | Update the README now that the Android app works | S | Done |
 | later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
 
@@ -659,12 +671,17 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-11-08, everything through #17 is merged into `main`.
+As of 2026-11-08, everything through #31 is merged into `main`, and `main` matches what's deployed.
 
-- **#31 is finished and PR #41 is waiting for Bode to merge** (branch `task_31_ios_notification_banner`): the Notification Content Extension and the backend's `aps.category`. Reviewed with the code-review skill on 2026-11-08; its findings were fixed or documented.
-  - **The deployed backend runs this branch, not `main`** (deployed from the Mac on 2026-11-08 with Bode's OK, before review, to test with a real reset). Once the PR is merged, `main` matches it again; no redeploy is needed.
-  - **If the PR is merged:** mark #31 Done in the roadmap, and change this section to say `main` matches what's deployed.
-  - The 2026-11-08 reset alerts arrived with `category: banner`, but the extension crashed on long-press (frameworks not linked, fixed the same day). With the fixed ad hoc build, long-pressing those alerts showed the activity banner with the title and body under it (Bode, 2026-11-08). Still true after the code-review fixes (timeout, stale downloads, background decoding).
+**Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 banner retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
+
+- **#42 is finished; PR #46 is waiting for Bode to merge** (branch `task_42_app_icon`): Owen Hartman's app icon on iOS and Android via `flutter_launcher_icons`, the Android notification silhouette, and "App icon by Owen Hartman." on About.
+  - Checked: the icon on Bode's iPad (ad hoc build). `flutter analyze` and `flutter test` are clean.
+  - **Not checked yet: Android.** The Mac has no Android SDK (Bode chose his PC for Android over installing one on the Mac). After merging, Bode runs `flutter run --release` on the Pixel from his PC and checks that the launcher icon isn't clipped and that alerts show the white silhouette. Any fix becomes a small follow-up.
+  - **After the merge:** mark #42 Done in the roadmap, and start #43.
+  - Owen may want a link next to his credit; Bode will ask.
+- **Open questions for #10:** keep iPad support in the first release (then its layout needs a look and 13" iPad screenshots), or iPhone-only?
+- **#31 (expanded banner on iOS) is done.** The 2026-11-08 reset alerts arrived with `category: banner`, but the extension crashed on long-press (frameworks not linked, fixed the same day). With the fixed ad hoc build, long-pressing those alerts showed the activity banner with the title and body under it (Bode, 2026-11-08). Still true after the code-review fixes (timeout, stale downloads, background decoding).
 - **#17 (iOS setup) is done.** Bode's iPad runs an ad hoc build (see iOS > Running on the iPad), and real reset alerts arrive with the weapon icon (2026-11-08).
 - **#36 checked:** the 18:34 UTC Force run that Tuesday wrote `xur: []`, and TODAY's XÛR section went away (Bode). His return is first checked at Friday's 17:07 UTC run.
 - **#13 (Xûr) was checked on the Pixel on 2026-10-19:** Xûr alerts for belled pieces arrived. The XÛR screens, card art and TODAY section looked right (Bode).
@@ -677,8 +694,8 @@ As of 2026-11-08, everything through #17 is merged into `main`.
   - The run started at 06:44:15 UTC, and all 3 watched focus weapons were posted between 06:45:06 and 06:45:08, while the phone was still idle.
   - On 2026-10-18 the same situation gave one alert, 50 minutes late.
 
-- **Backend:** the Cloud Function `daily_rotation` (deployed from #31's branch, see above). It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts. It can be deployed from Bode's PC or Mac.
-- **iOS app:** works end to end on Bode's iPad (ad hoc build): Today, Loot and Raids & Dungeons, watch bells, and alerts with the icon collapsed and the banner expanded. Not on the friend's iPhone yet; that needs TestFlight (#10).
+- **Backend:** the Cloud Function `daily_rotation`, deployed from `main` (#31). It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts. It can be deployed from Bode's PC or Mac.
+- **iOS app:** works end to end on Bode's iPad (ad hoc build): Today, Loot and Raids & Dungeons, watch bells, and alerts with the icon collapsed and the banner expanded. Never tried on an iPhone yet; the roommate gets it through internal TestFlight as part of #10.
 - **Android app:** works end to end on Bode's Pixel.
   - Today, Loot and Raids & Dungeons tabs, watch bells with instant taps, and the watch list.
   - Use **`flutter run --release`** to judge how it feels; debug builds are slower.
@@ -690,12 +707,16 @@ As of 2026-11-08, everything through #17 is merged into `main`.
   - With #30, tapping an alert opens the right tab: weapon → Today, raid → Raids & Dungeons (Bode, 2026-10-19).
   - A normal reset with #28 and #30 (2026-10-19, 17:07 UTC): every alert looked right (Bode).
 - **Next tasks, in suggested order:**
-  1. **#10** release: Android APK and iOS TestFlight, so the friend can install it. It needs the friend's app icon (brief: "D2 Loot Alert – App Icon Brief", a Claude Doc Bode exported as PDF). TestFlight builds are production-signed, so push works like the ad hoc build.
-  2. The "Project page and source code" link on About plus `.github/FUNDING.yml` (Decision log, 2026-10-27). Not a task yet; discuss with Bode first.
+  1. **Finish #42** (Android check on the Pixel, then commit and PR).
+  2. **#43** banner retry: App Store reviewers who see black cards may think the app is broken.
+  3. **#44** privacy policy and support page (GitHub Pages), plus the "Project page and source code" link on About. `.github/FUNDING.yml` is still only an idea (Decision log, 2026-10-27); discuss with Bode.
+  4. **#10** App Store: Bungie terms and Apple guideline check, `ITSAppUsesNonExemptEncryption`, the iPad decision, screenshots, store listing, privacy questionnaire, review notes, upload, internal TestFlight for the roommate, submit. Production-signed builds get push like the ad hoc build.
+  5. **#45** signed Android APK.
 - **Keep an eye on:**
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
   - **The iPad's ad hoc build expires 2027-09-04.** Rebuild and reinstall before then (iOS > Running on the iPad), or move the iPad to TestFlight with #10.
-  - **Banner images don't retry.** If one fails to download once (seen on LOOT on 2026-10-27: the Solo, Fireteam and Arena Ops cards stayed black), it stays blank until the app restarts. The links were fine. A retry in `BannerImage` would fix it; not a task yet.
+  - **Banner images don't retry** (#43). If one fails to download once (seen on LOOT on 2026-10-27: the Solo, Fireteam and Arena Ops cards stayed black), it stays blank until the app restarts. The links were fine.
+    - **It also hits weapon icons, and can hit every image at once** (iPad, 2026-11-09): no Bungie image showed anywhere, while the text did, since Firestore serves its on-device cache. Bungie served the same URLs fine, and closing and reopening the app fixed it. Likely the app opened while the connection or Bungie was briefly down. #43 should cover icons (`Image.network` in the item tiles) as well as banners.
   - "Still open (minor)" above.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
@@ -771,6 +792,8 @@ As of 2026-11-08, everything through #17 is merged into `main`.
 - **2026-11-04:** **iOS uses Swift Package Manager, not CocoaPods** (#17). The Flutter template already had it wired in, and it needs no Ruby setup on the Mac.
 - **2026-11-04:** **The iOS image extension is plain Swift** (#17), not Firebase's `FIRMessagingExtensionHelper`. It's ~40 lines and keeps the Firebase SDK out of a second target.
 - **2026-11-08:** **iOS alerts match Android's** (#31): icon collapsed, banner expanded, through a Notification Content Extension picked by the `banner` category. Raids use their banner for both. Chosen over the simpler "banner for both" on weapons too, because the collapsed alert should show which weapon it is.
+- **2026-11-08:** **Straight to the App Store, not TestFlight first** (Bode). Apple doesn't require TestFlight, and the uploaded build reaches internal TestFlight testers anyway, so the roommate tests on an iPhone during review. #10 became the App Store release; the Android APK moved to #45. Release plan: #42 icon, #43 banner retry, #44 privacy policy and support page, then #10.
+- **2026-11-08:** **App icon by Owen Hartman** (Bode's roommate), generated with `flutter_launcher_icons` (Bode: easier to change later than hand-made files). The Android notification icon is a white silhouette made from it, since Android shows the solid icon as a white square.
 - **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
   - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.
   - **Topics** are `xur_<name slug>`, like weapons (#26 showed hashes aren't stable).
