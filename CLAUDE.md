@@ -283,6 +283,7 @@ Flutter app (Android + iOS)
 | `firebase.json`, `.firebaserc` | Firebase CLI config: functions source and runtime, rules file, default project `d2-loot-alert` |
 | `firestore.rules` | Firestore security rules, deployed with `firebase deploy --only firestore:rules` |
 | `app/` | Flutter app (#8 onward) |
+| `docs/` | The public website, via GitHub Pages (#44): `index.md` (support page), `privacy.md` (privacy policy), `_config.yml`. Also `screenshots/` for the README. **Update `privacy.md` whenever the app starts handling data differently** (a new SDK, analytics, accounts…), along with its date and Apple's privacy questionnaire. |
 | `app/ios/NotificationService/`, `app/ios/NotificationContent/` | The iOS notification extensions, in Swift: the thumbnail (#17) and the expanded banner (#31). See App setup > iOS. |
 
 ### Firebase project
@@ -431,7 +432,7 @@ Flutter app (Android + iOS)
 
 Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, and the app ID is `com.id0.d2lootalert` on both platforms. The display name is "D2 Loot Alert".
 
-- **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17, `shared_preferences` ^2.5 (added in #9 for the watch list), `flutter_local_notifications` ^22.3.2 (added in #30 to draw Android alerts). Dev only: `flutter_launcher_icons` ^0.14.4 (added in #42 to generate the app icons; see Design system > App icon).
+- **Packages:** `firebase_core` ^5, `cloud_firestore` ^7, `firebase_messaging` ^17, `shared_preferences` ^2.5 (added in #9 for the watch list), `flutter_local_notifications` ^22.3.2 (added in #30 to draw Android alerts). `url_launcher` ^6.3.3 (added in #44 to open the privacy policy and project page from About; it needs Flutter 3.44 or newer). Dev only: `flutter_launcher_icons` ^0.14.4 (added in #42 to generate the app icons; see Design system > App icon).
   - **Adding a package on the Mac** (Flutter 3.47) also bumps four SDK-pinned entries in `pubspec.lock` (`matcher`, `meta`, `test_api`, `vector_math`). Before committing, set those four back to `main`'s versions, so the lockfile only adds the new package's entries (done in #42).
   - `flutter_local_notifications` needs core library desugaring in `android/app/build.gradle.kts` (`isCoreLibraryDesugaringEnabled` plus `desugar_jdk_libs` 2.1.4).
   - `getToken()` is deprecated in `firebase_messaging` 17 (replaced by `register()`/`onRegistered`). We don't need tokens, only topics.
@@ -656,8 +657,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | Done |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Done |
 | #42 | App icon on iOS and Android (with the Android notification icon), credit Owen Hartman on About | S | Done |
-| #43 | Bug: banner images retry after a failed download (icons too) | S | In progress |
-| #44 | Privacy policy and support page on GitHub Pages, project link on About | S | Backlog |
+| #43 | Bug: banner images retry after a failed download (icons too) | S | Done |
+| #44 | Privacy policy and support page on GitHub Pages, project link on About | S | In progress |
 | #10 | Release: iOS App Store (needs #42, #43, #44) | M | Backlog |
 | #45 | Release: signed Android APK | S | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | Done |
@@ -681,9 +682,13 @@ As of 2026-11-10, everything through #42 is merged into `main`, and `main` match
 
 **Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 image retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
 
-- **#43 is finished; PR #47 is waiting for Bode to merge** (branch `task_43`, named by Bode): images retry after a failed download. `RetryingNetworkImage` replaces `Image.network` in `BannerImage` and `ItemTile`, so banners and weapon and armor icons recover by themselves.
-  - Checked: `flutter analyze` clean, `flutter test` 24 passing (4 new). **Airplane Mode test on the iPad passed** (Bode, 2026-11-10): opened offline with blank images, and after reconnecting they filled in without a restart.
-  - **After the merge:** mark #43 Done in the roadmap, and start #44.
+- **In progress: #44** (branch `task_44`, named by Bode): the privacy policy and support page, and About's links.
+  - **Pages:** `docs/privacy.md` (privacy policy) and `docs/index.md` (support page), published with GitHub Pages from `main`'s `/docs` folder (Bode chose this repo over a separate one). `docs/_config.yml` sets the title and theme.
+    - URLs once live: `https://bodekaanta.github.io/D2-Loot-Alert/` (support) and `https://bodekaanta.github.io/D2-Loot-Alert/privacy/` (privacy policy). These go into App Store Connect in #10.
+  - **About:** PRIVACY POLICY and PROJECT PAGE AND SOURCE CODE buttons, next to OPEN-SOURCE LICENSES, opening the browser with `url_launcher` (added with Bode's OK). The privacy button only works once Pages is live.
+  - **Contact on both pages:** `d2lootalert@gmail.com`, a dedicated Gmail Bode made for the app (named "D2 Loot Alert"), plus GitHub Issues. Bode's personal email stays private; it's fine for the App Review contact in App Store Connect, which only Apple sees.
+  - **Still to do:** Bode reviews the page text; the build on the iPad has the buttons; then commit and PR. **After the merge, turn on GitHub Pages:** repo Settings → Pages → Build and deployment → Deploy from a branch → `main`, `/docs` → Save (Bode, or Claude with `gh api` if he says so). Then check both URLs and the About buttons.
+- **#43 (image retry) is done** (PR #47). `RetryingNetworkImage` replaces `Image.network` in `BannerImage` and `ItemTile`. The Airplane Mode test on the iPad passed (Bode, 2026-11-10).
 - **#42 (app icon) is done** (PR #46). Checked on the iPad, and on the Pixel by Bode from his PC (2026-11-09: the notification icon showed correctly). Owen may want a link next to his credit; Bode will ask.
 - **Open questions for #10:** keep iPad support in the first release (then its layout needs a look and 13" iPad screenshots), or iPhone-only?
 - **#31 (expanded banner on iOS) is done.** The 2026-11-08 reset alerts arrived with `category: banner`, but the extension crashed on long-press (frameworks not linked, fixed the same day). With the fixed ad hoc build, long-pressing those alerts showed the activity banner with the title and body under it (Bode, 2026-11-08). Still true after the code-review fixes (timeout, stale downloads, background decoding).
@@ -712,12 +717,11 @@ As of 2026-11-10, everything through #42 is merged into `main`, and `main` match
   - With #30, tapping an alert opens the right tab: weapon → Today, raid → Raids & Dungeons (Bode, 2026-10-19).
   - A normal reset with #28 and #30 (2026-10-19, 17:07 UTC): every alert looked right (Bode).
 - **Next tasks, in suggested order:**
-  1. **Finish #43** (Airplane Mode test on the iPad, then commit and PR).
-  2. **#44** privacy policy and support page (GitHub Pages), plus the "Project page and source code" link on About. `.github/FUNDING.yml` is still only an idea (Decision log, 2026-10-27); discuss with Bode.
-  3. **#10** App Store: Bungie terms and Apple guideline check, `ITSAppUsesNonExemptEncryption`, the iPad decision, screenshots, store listing, privacy questionnaire, review notes, upload, internal TestFlight for the roommate, submit. Production-signed builds get push like the ad hoc build.
+  1. **Finish #44** (above), then turn on GitHub Pages. `.github/FUNDING.yml` is still only an idea (Decision log, 2026-10-27); discuss with Bode before the store release.
+  2. **#10** App Store: Bungie terms and Apple guideline check, `ITSAppUsesNonExemptEncryption`, the iPad decision, screenshots, store listing, privacy questionnaire, review notes, upload, internal TestFlight for the roommate, submit. Production-signed builds get push like the ad hoc build.
      - **iPad recommendation** (Claude, 2026-11-10, waiting for Bode's call): iPhone-only for version 1. Fewer screenshots, no iPad layout review, and Bode's iPad can still run it as an iPhone app. iPad support can be added in an update, but once a version ships with it, it can't be removed.
      - **What Bode does in App Store Connect** (Claude gives the clicks): create the app record (name, bundle ID `com.id0.d2lootalert`, SKU), paste the listing, screenshots, privacy and support URLs, category, Free, countries, the App Privacy and age-rating questionnaires, the EU trader declaration (not a trader), upload the build from Xcode's Organizer, add the roommate as an internal TestFlight tester, submit. An individual account shows Bode's legal name as the seller. No banking or tax setup for a free app.
-  4. **#45** signed Android APK.
+  3. **#45** signed Android APK.
 - **Keep an eye on:**
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
   - **The iPad's ad hoc build expires 2027-09-04.** Rebuild and reinstall before then (iOS > Running on the iPad), or move the iPad to TestFlight with #10.
@@ -774,7 +778,7 @@ As of 2026-11-10, everything through #42 is merged into `main`, and `main` match
   - **Plan:** the About screen gets one neutrally worded link, "Project page and source code", to the public GitHub repo. The donation link lives on GitHub only, as a Sponsor button via `.github/FUNDING.yml` (Buy Me a Coffee, Patreon or GitHub Sponsors).
   - **Keep the in-app wording free of "donate", "tip" or "support"**, with no banners, popups or prompts, and nothing locked behind the link.
   - **Before a public store release,** re-read the current Apple and Google guidelines, since the external-link rules have been changing. Also check Bungie's API terms and fan-content policy on donations; CLAUDE.md's art rules say "making money" crosses the line, and it's unclear whether donations count.
-  - Not built yet. Needs its own task on the board (S).
+  - **The About link is built** (#44): "PROJECT PAGE AND SOURCE CODE". `.github/FUNDING.yml` isn't; discuss with Bode before the store release.
 - **2026-10-18:** **Weapons are identified by name, not item hash** (#26).
   - Bungie has several hashes for some weapons (the Warden of Nothing GM versions), and the bonus focus can be any of them.
   - Watching a weapon covers every version, and LOOT lists each weapon once, with no layout change.
@@ -798,6 +802,9 @@ As of 2026-11-10, everything through #42 is merged into `main`, and `main` match
 - **2026-11-08:** **iOS alerts match Android's** (#31): icon collapsed, banner expanded, through a Notification Content Extension picked by the `banner` category. Raids use their banner for both. Chosen over the simpler "banner for both" on weapons too, because the collapsed alert should show which weapon it is.
 - **2026-11-08:** **Straight to the App Store, not TestFlight first** (Bode). Apple doesn't require TestFlight, and the uploaded build reaches internal TestFlight testers anyway, so the roommate tests on an iPhone during review. #10 became the App Store release; the Android APK moved to #45. Release plan: #42 icon, #43 banner retry, #44 privacy policy and support page, then #10.
 - **2026-11-08:** **App icon by Owen Hartman** (Bode's roommate), generated with `flutter_launcher_icons` (Bode: easier to change later than hand-made files). The Android notification icon is a white silhouette made from it, since Android shows the solid icon as a white square.
+- **2026-11-10:** **The privacy policy and support page live in this repo's `docs/`, published with GitHub Pages** (#44), not a separate repo. They stay next to the code they describe and are reviewed in the same PRs. If the repo ever goes private, Pages on a free account stops working, so the policy would need a new home first.
+- **2026-11-10:** **Public contact is a dedicated address, `d2lootalert@gmail.com`**, not Bode's personal email, which would be harvested from the public pages and the App Store. It can forward to Bode's inbox.
+- **2026-11-10:** **The privacy policy promises no analytics, ads, tracking or accounts.** The built app was checked: no Google Analytics library is linked (`IS_ANALYTICS_ENABLED` is false). Firebase Installations and FCM tokens are the only identifiers, used to deliver notifications. Adding any SDK that collects data means updating the policy first.
 - **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
   - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.
   - **Topics** are `xur_<name slug>`, like weapons (#26 showed hashes aren't stable).
