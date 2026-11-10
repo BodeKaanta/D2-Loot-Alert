@@ -1,13 +1,35 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../push.dart';
 import '../theme.dart';
 import '../widgets/section_header.dart';
 
+/// The privacy policy, published from docs/privacy.md with GitHub Pages (#44).
+/// Apple requires a link to it inside the app, not only on the App Store page.
+const privacyPolicyUrl = 'https://bodekaanta.github.io/D2-Loot-Alert/privacy/';
+
+/// The public repo. Keep its in-app label neutral, with no "donate", "tip" or
+/// "support" wording (Decision log, 2026-10-27).
+const projectPageUrl = 'https://github.com/BodeKaanta/D2-Loot-Alert';
+
 /// What the app is, credits and disclaimers, plus a push test panel in debug builds.
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
+
+  /// Opens [url] in the browser, or says so if that isn't possible.
+  static Future<void> _open(BuildContext context, String url) async {
+    bool opened;
+    try {
+      opened = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (_) {
+      opened = false; // e.g. no browser on the device
+    }
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Couldn't open $url")));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,12 +61,24 @@ class AboutScreen extends StatelessWidget {
             style: AppText.body,
           ),
           const SizedBox(height: 20),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton(
-              onPressed: () => showLicensePage(context: context, applicationName: 'D2 Loot Alert'),
-              child: const Text('OPEN-SOURCE LICENSES'),
-            ),
+          // Buttons wrap onto a second line on narrow phones.
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              OutlinedButton(
+                onPressed: () => _open(context, privacyPolicyUrl),
+                child: const Text('PRIVACY POLICY'),
+              ),
+              OutlinedButton(
+                onPressed: () => _open(context, projectPageUrl),
+                child: const Text('PROJECT PAGE AND SOURCE CODE'),
+              ),
+              OutlinedButton(
+                onPressed: () => showLicensePage(context: context, applicationName: 'D2 Loot Alert'),
+                child: const Text('OPEN-SOURCE LICENSES'),
+              ),
+            ],
           ),
           // Debug builds only: lets Bode send this device a test push (#8).
           if (kDebugMode) ...[

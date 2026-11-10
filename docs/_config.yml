@@ -1,0 +1,6 @@
+# GitHub Pages settings for docs/ (#44): the App Store's support and privacy policy pages.
+# Published at https://bodekaanta.github.io/D2-Loot-Alert/ once Pages is turned on
+# (repo Settings > Pages > Deploy from a branch > main, /docs).
+title: D2 Loot Alert
+description: Bonus drop and featured raid alerts for Destiny 2. An unofficial fan app.
+theme: jekyll-theme-primer
