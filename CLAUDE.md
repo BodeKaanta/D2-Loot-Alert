@@ -452,7 +452,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   | `notifications.dart` | Draws Android alerts (#30): the background handler, foreground alerts, the "Bonus drops" channel, and alert taps. On iOS it only turns on foreground alerts (#17). |
   | `watch_store.dart` | The watch list (see Watching below), plus `WatchScope` |
   | `screens/` | `home_screen` (tabs and push taps), `today_screen`, `loot_screen`, `category_screen`, `xur_screen` (#13), `raids_screen`, `about_screen` |
-  | `widgets/` | Section header, banner image, activity card with `WeaponRow`/`WeaponBell`/`ItemRow`/`ItemTile`, featured grid and card with `RaidBell`, `ArmorRow`/`ArmorBell` (#13), `LinkCard` (banner card that opens a screen), reset countdown, `WatchBell`, `AppTabBar`, `PageHeader` |
+  | `widgets/` | Section header, banner image, activity card with `WeaponRow`/`WeaponBell`/`ItemRow`/`ItemTile`, featured grid and card with `RaidBell`, `ArmorRow`/`ArmorBell` (#13), `LinkCard` (banner card that opens a screen), reset countdown, `WatchBell`, `AppTabBar`, `PageHeader`, `RetryingNetworkImage` (#43, every Bungie image) |
 
 - **Tabs** (bottom, `AppTabBar`, **three equal thirds** so LOOT sits in the middle, as Bode asked): **TODAY / LOOT / RAIDS & DUNGEONS**. "RAIDS &" / "DUNGEONS" is stacked on two lines (Bode: it crowded the screen edge; stacking also keeps one text size on narrower iPhones). Every tab has the same two-line label area, so the underlines line up. The last name matches the game's wording (Bode). `IndexedStack` keeps each tab's scroll position.
 - **Today:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
@@ -506,7 +506,11 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Judge smoothness in a release build** (`flutter run --release`). Debug builds scroll noticeably worse and aren't representative.
   - **Banners decode at their on-screen size** (`cacheWidth` in `BannerImage`, from `LayoutBuilder`) instead of Bungie's ~1920 px originals. `BoxFit.cover` on the taller grid cells is accounted for.
   - **No disk image cache.** Release scrolling was already smooth, so it wasn't worth a new package.
-- **Tests:** `flutter test` (20 tests: models, category loot, READY TO FARM, reset math, watch store) and `flutter analyze`, both clean as of #13.
+- **Images retry after a failed download** (#43, `widgets/retrying_network_image.dart`). Use `RetryingNetworkImage`, never `Image.network`, for Bungie images.
+  - **Why:** `Image.network` downloads once. After a failure it shows its error widget and never tries again, because rebuilding it with the same URL changes nothing. Seen on LOOT on 2026-10-27 (three black category cards) and on the iPad on 2026-11-09, when *every* Bungie image was blank while the text showed from Firestore's on-device cache. A restart fixed both.
+  - **How:** it wraps an `Image` keyed by an attempt counter. A retry evicts the failed image from Flutter's image cache, then bumps the key, so a fresh `Image` downloads again. Retries come 2, 4, 8, 16 and 32 s after a failure, then it stops; returning to the app (lifecycle `resumed`) retries any failed image, even after it gave up. `errorBuilder` runs during a build, so it only schedules the retry; `setState` happens in the timer.
+  - Used by `BannerImage` (activity, raid, LOOT and XÛR banners) and `ItemTile` (weapon and armor icons). The notification extensions download their own images.
+- **Tests:** `flutter test` (24 tests: models, category loot, READY TO FARM, reset math, watch store, image retry) and `flutter analyze`, both clean as of #43. `flutter_test` answers every HTTP request with 400, which the image retry tests rely on.
 
 ### Design system (agreed with Bode in #8)
 
@@ -613,6 +617,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
        - Xcode creates the ad hoc profile automatically. It only covers devices registered to the developer account (the iPad is), so it can't go to the friend. The 2026-11-07 profile expires 2027-09-04.
        - Check it with `codesign -d --entitlements - --xml Payload/Runner.app`: `aps-environment` should be `production`.
        - After installing over a development build, open the app and re-tap the bells, so the topics are tied to the new production push token.
+       - **After an icon change, restart the iPad.** Reinstalling updates the home-screen icon, but iOS can keep showing the old one on notifications (seen 2026-11-09: the Flutter icon). A restart fixed it. App Store installs are fresh and don't hit this.
+       - **Installing needs the iPad unlocked.** Otherwise `devicectl` fails with "The developer disk image could not be mounted… the device was still locked".
        - **Real-world check, 2026-11-08:** the 17:07 UTC reset alert reached the iPad with the weapon icon, with no Mac attached.
   5. The About screen's test-push button only exists in debug builds (see the push test below). The Firebase console's **Notification image** field sets `fcm_options.image` and `mutable-content`, so a console test also checks the extension.
 
@@ -649,8 +655,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #30 | Custom notifications on Android: weapon icon collapsed, activity banner expanded | M | Done |
 | #31 | Custom notifications on iOS (Notification Content Extension; needs #17 and #30) | M | Done |
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Done |
-| #42 | App icon on iOS and Android (with the Android notification icon), credit Owen Hartman on About | S | In progress |
-| #43 | Bug: banner images retry after a failed download | S | Backlog |
+| #42 | App icon on iOS and Android (with the Android notification icon), credit Owen Hartman on About | S | Done |
+| #43 | Bug: banner images retry after a failed download (icons too) | S | In progress |
 | #44 | Privacy policy and support page on GitHub Pages, project link on About | S | Backlog |
 | #10 | Release: iOS App Store (needs #42, #43, #44) | M | Backlog |
 | #45 | Release: signed Android APK | S | Backlog |
@@ -671,15 +677,14 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-11-08, everything through #31 is merged into `main`, and `main` matches what's deployed.
+As of 2026-11-10, everything through #42 is merged into `main`, and `main` matches what's deployed.
 
-**Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 banner retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
+**Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 image retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
 
-- **#42 is finished; PR #46 is waiting for Bode to merge** (branch `task_42_app_icon`): Owen Hartman's app icon on iOS and Android via `flutter_launcher_icons`, the Android notification silhouette, and "App icon by Owen Hartman." on About.
-  - Checked: the icon on Bode's iPad (ad hoc build). `flutter analyze` and `flutter test` are clean.
-  - **Not checked yet: Android.** The Mac has no Android SDK (Bode chose his PC for Android over installing one on the Mac). After merging, Bode runs `flutter run --release` on the Pixel from his PC and checks that the launcher icon isn't clipped and that alerts show the white silhouette. Any fix becomes a small follow-up.
-  - **After the merge:** mark #42 Done in the roadmap, and start #43.
-  - Owen may want a link next to his credit; Bode will ask.
+- **#43 is finished; PR #47 is waiting for Bode to merge** (branch `task_43`, named by Bode): images retry after a failed download. `RetryingNetworkImage` replaces `Image.network` in `BannerImage` and `ItemTile`, so banners and weapon and armor icons recover by themselves.
+  - Checked: `flutter analyze` clean, `flutter test` 24 passing (4 new). **Airplane Mode test on the iPad passed** (Bode, 2026-11-10): opened offline with blank images, and after reconnecting they filled in without a restart.
+  - **After the merge:** mark #43 Done in the roadmap, and start #44.
+- **#42 (app icon) is done** (PR #46). Checked on the iPad, and on the Pixel by Bode from his PC (2026-11-09: the notification icon showed correctly). Owen may want a link next to his credit; Bode will ask.
 - **Open questions for #10:** keep iPad support in the first release (then its layout needs a look and 13" iPad screenshots), or iPhone-only?
 - **#31 (expanded banner on iOS) is done.** The 2026-11-08 reset alerts arrived with `category: banner`, but the extension crashed on long-press (frameworks not linked, fixed the same day). With the fixed ad hoc build, long-pressing those alerts showed the activity banner with the title and body under it (Bode, 2026-11-08). Still true after the code-review fixes (timeout, stale downloads, background decoding).
 - **#17 (iOS setup) is done.** Bode's iPad runs an ad hoc build (see iOS > Running on the iPad), and real reset alerts arrive with the weapon icon (2026-11-08).
@@ -707,16 +712,15 @@ As of 2026-11-08, everything through #31 is merged into `main`, and `main` match
   - With #30, tapping an alert opens the right tab: weapon → Today, raid → Raids & Dungeons (Bode, 2026-10-19).
   - A normal reset with #28 and #30 (2026-10-19, 17:07 UTC): every alert looked right (Bode).
 - **Next tasks, in suggested order:**
-  1. **Finish #42** (Android check on the Pixel, then commit and PR).
-  2. **#43** banner retry: App Store reviewers who see black cards may think the app is broken.
-  3. **#44** privacy policy and support page (GitHub Pages), plus the "Project page and source code" link on About. `.github/FUNDING.yml` is still only an idea (Decision log, 2026-10-27); discuss with Bode.
-  4. **#10** App Store: Bungie terms and Apple guideline check, `ITSAppUsesNonExemptEncryption`, the iPad decision, screenshots, store listing, privacy questionnaire, review notes, upload, internal TestFlight for the roommate, submit. Production-signed builds get push like the ad hoc build.
-  5. **#45** signed Android APK.
+  1. **Finish #43** (Airplane Mode test on the iPad, then commit and PR).
+  2. **#44** privacy policy and support page (GitHub Pages), plus the "Project page and source code" link on About. `.github/FUNDING.yml` is still only an idea (Decision log, 2026-10-27); discuss with Bode.
+  3. **#10** App Store: Bungie terms and Apple guideline check, `ITSAppUsesNonExemptEncryption`, the iPad decision, screenshots, store listing, privacy questionnaire, review notes, upload, internal TestFlight for the roommate, submit. Production-signed builds get push like the ad hoc build.
+     - **iPad recommendation** (Claude, 2026-11-10, waiting for Bode's call): iPhone-only for version 1. Fewer screenshots, no iPad layout review, and Bode's iPad can still run it as an iPhone app. iPad support can be added in an update, but once a version ships with it, it can't be removed.
+     - **What Bode does in App Store Connect** (Claude gives the clicks): create the app record (name, bundle ID `com.id0.d2lootalert`, SKU), paste the listing, screenshots, privacy and support URLs, category, Free, countries, the App Privacy and age-rating questionnaires, the EU trader declaration (not a trader), upload the build from Xcode's Organizer, add the roommate as an internal TestFlight tester, submit. An individual account shows Bode's legal name as the seller. No banking or tax setup for a free app.
+  4. **#45** signed Android APK.
 - **Keep an eye on:**
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
   - **The iPad's ad hoc build expires 2027-09-04.** Rebuild and reinstall before then (iOS > Running on the iPad), or move the iPad to TestFlight with #10.
-  - **Banner images don't retry** (#43). If one fails to download once (seen on LOOT on 2026-10-27: the Solo, Fireteam and Arena Ops cards stayed black), it stays blank until the app restarts. The links were fine.
-    - **It also hits weapon icons, and can hit every image at once** (iPad, 2026-11-09): no Bungie image showed anywhere, while the text did, since Firestore serves its on-device cache. Bungie served the same URLs fine, and closing and reopening the app fixed it. Likely the app opened while the connection or Bungie was briefly down. #43 should cover icons (`Image.network` in the item tiles) as well as banners.
   - "Still open (minor)" above.
 - **Phase 0 script:** run `python phase0/api_test.py` from the repo root. It needs `phase0/.env`, which holds the API key and Bungie name and is gitignored.
 
