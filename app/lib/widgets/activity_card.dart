@@ -4,6 +4,7 @@ import '../models.dart';
 import '../theme.dart';
 import '../watch_store.dart';
 import 'banner_image.dart';
+import 'retrying_network_image.dart';
 import 'watch_bell.dart';
 
 /// One activity's card: its banner and name, then its bonus focus weapons.
@@ -132,9 +133,8 @@ class ItemTile extends StatelessWidget {
         color: Colors.black,
         border: Border.all(color: AppColors.tileBorder),
       ),
-      child: url == null
-          ? null
-          : Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => const SizedBox()),
+      // Tries again if the download fails (#43); until then the tile is just black.
+      child: url == null ? null : RetryingNetworkImage(url, fit: BoxFit.cover),
     );
   }
 }

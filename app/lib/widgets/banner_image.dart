@@ -2,6 +2,8 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import 'retrying_network_image.dart';
+
 /// Bungie's activity art with a dark gradient on top so the text over it stays
 /// readable on any image. With no [url] (or if it fails to load) it's just dark.
 class BannerImage extends StatelessWidget {
@@ -58,7 +60,8 @@ class BannerImage extends StatelessWidget {
 
   Widget _picture(BuildContext context, BoxConstraints size, String url) {
     final decodeWidth = _decodeWidth(context, size);
-    final picture = Image.network(
+    // Tries again if the download fails (#43); until then the banner is just dark.
+    final picture = RetryingNetworkImage(
       url,
       fit: BoxFit.cover,
       alignment: alignment,
@@ -66,7 +69,6 @@ class BannerImage extends StatelessWidget {
       // Decoding at the shown size saves decode time and memory (#20); a zoomed
       // picture needs that many times more pixels to stay sharp.
       cacheWidth: decodeWidth == null ? null : (decodeWidth * zoom).round(),
-      errorBuilder: (_, _, _) => const SizedBox(),
     );
     if (zoom == 1) return picture;
     // Scaling doesn't change the picture's layout size, so clip it to the card.
