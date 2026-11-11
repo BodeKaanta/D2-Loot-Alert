@@ -121,24 +121,6 @@ void main() {
     expect(reopened.armor.single.description, 'Hunter chest armor');
   });
 
-  test('weapon watches saved before #26 (no id) are dropped, raids are kept', () async {
-    SharedPreferences.setMockInitialValues({
-      'watches': jsonEncode({
-        'weapons': [
-          {'itemHash': 123, 'name': 'Spare Rations', 'type': 'Hand Cannon', 'category': 'Gambit Ops'},
-        ],
-        'raids': [
-          {'id': 'last-wish', 'name': 'Last Wish', 'kind': 'raid'},
-        ],
-      }),
-    });
-    prefs = await SharedPreferences.getInstance();
-
-    final store = newStore();
-    expect(store.weapons, isEmpty);
-    expect(store.isWatchingRaid('last-wish'), isTrue);
-  });
-
   test('nothing is saved without notification permission', () async {
     push.permission = false;
     final store = newStore();

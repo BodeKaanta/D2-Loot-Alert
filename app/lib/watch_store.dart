@@ -194,11 +194,7 @@ class WatchStore extends ChangeNotifier {
     try {
       final json = jsonDecode(saved) as Map<String, dynamic>;
       for (final w in (json['weapons'] as List? ?? const [])) {
-        final map = Map<String, dynamic>.from(w as Map);
-        // Saved before #26, keyed by item hash. Those topics no longer get
-        // alerts, so drop them; the user re-taps the bells (Bode's choice).
-        if (map['id'] == null) continue;
-        final watched = WatchedWeapon.fromJson(map);
+        final watched = WatchedWeapon.fromJson(Map<String, dynamic>.from(w as Map));
         _weapons[watched.weapon.id] = watched;
       }
       for (final r in (json['raids'] as List? ?? const [])) {

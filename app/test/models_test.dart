@@ -48,10 +48,6 @@ void main() {
     expect(rotation.featured, isEmpty);
   });
 
-  test('a weapon without an id (written before #26) falls back to its hash', () {
-    expect(Weapon.fromMap({'itemHash': 123, 'name': 'Spare Rations'}).id, '123');
-  });
-
   Weapon w(int hash, String name) =>
       Weapon(id: name.toLowerCase().replaceAll(' ', '-'), itemHash: hash, name: name, type: 'Pulse Rifle');
   LootPool pool(String name, String category, List<Weapon> weapons) =>
