@@ -675,7 +675,7 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #42 | App icon on iOS and Android (with the Android notification icon), credit Owen Hartman on About | S | Done |
 | #43 | Bug: banner images retry after a failed download (icons too) | S | Done |
 | #44 | Privacy policy and support page on GitHub Pages, project link on About | S | Done |
-| #10 | Release: iOS App Store (needs #42, #43, #44) | M | In progress |
+| #10 | Release: iOS App Store (needs #42, #43, #44) | M | In review (submitted 2026-11-11) |
 | #45 | Release: signed Android APK | S | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | Done |
 | #34 | Today: READY TO FARM section with what you watch that's available now | S | Done |
@@ -696,9 +696,9 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its rollout notes) is merged into `main`, and `main` matches what's deployed. The backend and the Firestore rules went out on 2026-11-11.
+As of 2026-11-11, everything through PR #54 is merged into `main`, and `main` matches what's deployed. The backend and the Firestore rules went out on 2026-11-11. **Version 1.0.0 is in App Review** (submitted 2026-11-11).
 
-**Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 image retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
+**The App Store release (#10) is submitted and waiting on Apple's review.** Plan agreed with Bode on 2026-11-08: #42 icon → #43 image retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
 
 - **The pre-release bug sweep is done:** PR #51, merged and deployed on 2026-11-11 (see the Decision log). Its rollout finished the same day (below).
   - **The fixes:**
@@ -716,10 +716,10 @@ As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its r
        - Checked: iPhone-only, portrait only, the encryption key, `aps-environment = production`, no `get-task-allow`, export method `app-store-connect`.
        - It was built after the iPad build below, so `build/ios/` held the App Store archive.
     4. **Done 2026-11-11:** the iPad has a native iPad ad hoc build of the same code (made with the `2e5564b` settings, then restored; see #10 below), and Bode installed the new build on the Pixel.
-    5. **Done 2026-11-11:** Bode deleted the old `lootPools` collection in the Firebase console, and `firestore.rules` no longer lists it. If that rules change isn't deployed yet, run `firebase deploy --only firestore:rules`.
-- **In progress: #10**, the App Store release, in several PRs, so issue #10 stays open until the app is submitted. The release settings (iPhone-only, portrait, encryption, launch screen) were PR #49, and the listing, screenshots script and donation decision PR #50 (both merged). See Next tasks below for the steps.
-  - **Now:** the last code change before the upload removes the code for data from before #26 (branch `task_10_remove_pre26_code`, from the 2026-11-11 code review).
-  - **After it's merged:** Claude rebuilds the App Store upload from `main` (the earlier build predates the change) and deploys PR #53's rules. Then Bode uploads.
+    5. **Done 2026-11-11:** Bode deleted the old `lootPools` collection in the Firebase console, and `firestore.rules` no longer lists it. That rules change was deployed the same day, and the old path now gets 403.
+- **In review: #10**, the App Store release. **Version 1.0.0 (build 1) was submitted for App Review on 2026-11-11.** Issue #10 stays open until the app is approved and live. The release settings (iPhone-only, portrait, encryption, launch screen) were PR #49, and the listing, screenshots script and donation decision PR #50 (both merged). See Next tasks below.
+  - **Submitted without TestFlight** (Bode): the roommate couldn't test that night, and Bode wanted it submitted. TestFlight can still be used for later builds.
+  - **The last change before the upload** removed the code for data from before #26 (PR #54, from the 2026-11-11 code review). The upload was then rebuilt from `main` (`87ecec0`), checked and delivered with Transporter, and PR #53's rules were deployed.
 - **#44 (privacy policy and support page) is done** (PR #48). GitHub Pages serves `main`'s `/docs` folder (turned on by Bode, 2026-11-10). Both pages are live, and About's PRIVACY POLICY and PROJECT PAGE AND SOURCE CODE buttons open them (checked on the iPad by Bode). These URLs go into App Store Connect:
   - Support: `https://bodekaanta.github.io/D2-Loot-Alert/`
   - Privacy policy: `https://bodekaanta.github.io/D2-Loot-Alert/privacy/`
@@ -752,7 +752,7 @@ As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its r
   - With #30, tapping an alert opens the right tab: weapon → Today, raid → Raids & Dungeons (Bode, 2026-10-19).
   - A normal reset with #28 and #30 (2026-10-19, 17:07 UTC): every alert looked right (Bode).
 - **Next tasks, in suggested order:**
-  1. **#10** App Store (in progress). The listing text, App Privacy answers and review notes are drafted in `store/app_store_listing.md` (waiting for Bode's review). Production-signed builds get push like the ad hoc build.
+  1. **#10** App Store (in review since 2026-11-11). The listing text, App Privacy answers, age rating and review notes, as submitted, are in `store/app_store_listing.md`. Production-signed builds get push like the ad hoc build.
      - **Done in the project** (2026-11-10): iPhone-only (`TARGETED_DEVICE_FAMILY = 1` on every target), portrait only, `ITSAppUsesNonExemptEncryption = false` in `Info.plist` (the app only uses HTTPS through the OS, so App Store Connect stops asking about export compliance), and a launch screen with the app icon centred on the app's dark background (`#0B0E11` in `LaunchScreen.storyboard`, instead of Flutter's white). The icon is 128 pt with rounded corners, in `Assets.xcassets/LaunchImage.imageset` (1x/2x/3x, made from `assets/icon/app_icon.png` with a small CoreGraphics script; remake them if the icon changes). iOS caches launch screens, so a reinstall may still show the old one until the device restarts. An App Store build (`flutter build ipa --release` in `app/`) signs, with `aps-environment = production`. Every SDK in the app ships its own privacy manifest, and our code uses no required-reason APIs, so the app needs none of its own.
      - **Bode's iPad keeps a native iPad build** for daily use (iPhone-only apps run in a small phone-sized window there). To make one: check out the iPad settings from before #10 for the build only (`git checkout 2e5564b -- app/ios/Runner.xcodeproj/project.pbxproj app/ios/Runner/Info.plist`), build and install the ad hoc build (iOS > Running on the iPad), then put them back with `git checkout HEAD -- <same files>`. Never commit them.
      - **Done:** the App Store Connect record "D2 Loot Alert" (created by Bode 2026-11-10; its "user access settings could not be saved" message is harmless on a one-person account), the updated Apple Developer Program License Agreement (accepted by Bode).
@@ -760,6 +760,7 @@ As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its r
      - **Apple risk:** guideline 5.2 (third-party content). The review notes say the images and data come from Bungie's official API under its non-commercial terms. No "Destiny" in the keywords (guideline 2.3.7).
      - **Screenshots** (done 2026-11-10): `tool/screenshots.sh <simulator id>` in `app/` writes 5 PNGs to `app/build/screenshots/` (TODAY with READY TO FARM, TODAY at BONUS FOCUS, LOOT, Fireteam Ops' weapons, RAIDS & DUNGEONS).
        - Use the **iPhone 18 Pro Max** simulator (`xcrun simctl list devices`): its screen is exactly Apple's 6.9" size, 1320×2868.
+       - **But that's not what App Store Connect requires now** (found 2026-11-11). The required slot is the medium iPhone size, 1206×2622, and screenshots can't have an alpha channel, while the simulator's PNGs do. For 1.0 they were converted after capture (`store/app_store_listing.md` > Screenshots). Making the script do it is on the cleanup list.
        - The script sets the status bar to 9:41 with full battery, then runs `integration_test/screenshots_test.dart`. That test saves a watch list built from today's rotation (3 weapons from different categories, each the focus in only one activity with a banner, plus a featured raid or dungeon, plus a Xûr piece if he's there), starts the app's UI (`LootAlertApp`, without `main()`'s startup re-subscribe, whose permission prompt nobody could dismiss), and walks the tabs. It prints `SCREENSHOT:<name>` on each screen, and the script captures it with `xcrun simctl io <id> screenshot`.
        - **Why it's automated:** Xcode 27.2 on the Mac has no Simulator window app (not in the bundle, no Open Developer Tool menu), so nobody can tap in the simulator.
        - The watch list is saved directly instead of tapped, because a tap shows iOS's notification permission dialog. It doesn't subscribe to any topics.
@@ -770,7 +771,9 @@ As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its r
        - On 2026-11-10 the archive in `build/ios/` was the iPad ad hoc build (iPhone and iPad, landscape, no encryption key). Uploading it would have shipped iPad support for good.
      - **Screen recording for App Review** (the Attachment in App Review Information): a reviewer can't trigger an alert, since the bonus focus changes at every reset.
        - Record on the iPad, not the Pixel: Apple is reviewing the iOS app, and Android in the video would show another platform.
-       - **Done:** Bode recorded it on the iPad on 2026-11-10. AirDrop it to the Mac and attach it on the version's page in App Store Connect, under App Review Information. Attachments belong to one version, so a later version needs it attached again.
+       - **Done:** Bode recorded it on the iPad on 2026-11-10 and attached it to the 1.0.0 submission (version page → App Review Information). Attachments belong to one version, so a later version needs it attached again.
+       - **The file format matters.** App Store Connect refused the iPad's own file, HEVC with an uppercase `.MP4`, as an unsupported type. An H.264 copy with a lowercase `.mp4` uploaded: `avconvert --source <in> --preset PresetHighestQuality --output <out>.mp4`.
+       - **The notes may only claim what the video shows.** 1.0's recording doesn't show tapping the alert, so the notes describe tapping as how the app works, not as part of the video.
        - **Bode records it; Claude can't.** Nothing on the Mac can record or tap a real iPad's screen, and the alert has to be a real push.
        - Steps:
          1. Start the iPad's screen recording (Control Center → Screen Recording).
@@ -781,9 +784,17 @@ As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its r
          6. Stop the recording and trim it in Photos.
        - If the alert doesn't show up in the recording, turn on Settings → Notifications → Screen Sharing → Allow Notifications.
        - Removing one topic resends only that weapon's alert (to everyone watching it, which before release is only Bode). Deleting all of `meta/state` would also resend every other alert and rebuild the pools.
-     - **Still to do:** Bode's review of the listing and screenshots, attaching the screen recording, the EU trader status (not a trader), upload, internal TestFlight for the roommate, submit.
-       - **The upload:** after the pre-#26 code removal is merged, Claude rebuilds it from `main` and checks it (Upload a fresh build, above). Then Bode drags `app/build/ios/ipa/d2lootalert.ipa` into Apple's Transporter app, or distributes `build/ios/archive/Runner.xcarchive` from Xcode's Organizer.
-       - If another iPad build is made before uploading, build the App Store one again first (Upload a fresh build, above).
+     - **Done 2026-11-11:** the upload and the submission.
+       - **The upload:** built from `main` (`87ecec0`) and checked by Claude. Bode then delivered `app/build/ios/ipa/d2lootalert.ipa` with Apple's Transporter app.
+       - **For later uploads:** if an iPad build was made since, build the App Store one again first (Upload a fresh build, above). Also bump the build number in `pubspec.yaml` (`1.0.0+2`…), since App Store Connect never takes the same one twice.
+     - **Still to do:**
+       - Wait for App Review, and answer any question or fix a rejection.
+       - After approval, the app goes live, or Bode releases it if he chose manual release.
+       - Then close #10, and add the App Store link to the README and the support page.
+     - **What came up in App Store Connect on 2026-11-11** (for the next version):
+       - **Add for Review needs every required field.** Description, Keywords, Support URL, a chosen build, and Copyright (in General App Information, near the bottom of the version page).
+       - **The Build section can lag.** It can say "Upload your builds…" for a while after the build has processed. Save, reload the page and give it a few minutes.
+       - **The age rating has a "Guns or Other Weapons" question.** It's answered Frequent, which makes the app 12+ (`store/app_store_listing.md`).
      - **What Bode does in App Store Connect** (Claude gives the clicks): create the app record (name, bundle ID `com.id0.d2lootalert`, SKU), paste the listing, screenshots, privacy and support URLs, category, Free, countries, the App Privacy and age-rating questionnaires, the EU trader declaration (not a trader), upload the build from Xcode's Organizer, add the roommate as an internal TestFlight tester, submit. An individual account shows Bode's legal name as the seller. No banking or tax setup for a free app.
   2. **#45** signed Android APK.
 - **Keep an eye on:**
@@ -891,6 +902,8 @@ As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its r
     - `update_loot_pools()` takes six parameters.
     - Dates, names and issue numbers in code comments (they belong in commits and here).
     - Maybe deleting `phase0/` (its own Bungie client; git keeps it).
+    - `tool/screenshots.sh` should produce what App Store Connect takes: the medium iPhone size (1206×2622) with no alpha channel (`store/app_store_listing.md` > Screenshots).
+- **2026-11-11:** **Version 1.0.0 went to App Review without TestFlight** (Bode). The roommate couldn't test that night, and Bode wanted it submitted. The age rating is 12+: the questionnaire's new "Guns or Other Weapons" question is honestly Frequent, since weapon icons are everywhere, and answering "None" would have risked a rejection.
   - **App Review gets a screen recording** of a real alert, since a reviewer can't trigger one.
 - **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
   - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.
