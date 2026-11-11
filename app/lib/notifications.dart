@@ -127,12 +127,18 @@ Future<Uint8List?> _download(String? url) async {
   if (url == null) return null;
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
   try {
-    final response = await (await client.getUrl(Uri.parse(url))).close();
-    if (response.statusCode != HttpStatus.ok) return null;
-    return await consolidateHttpClientResponseBytes(response).timeout(const Duration(seconds: 10));
+    // One time limit for the whole download, including the wait for the server to
+    // answer: a server that stalls after connecting mustn't hold up the alert.
+    return await _get(client, Uri.parse(url)).timeout(const Duration(seconds: 10));
   } catch (_) {
     return null; // show the alert without this image rather than not at all
   } finally {
-    client.close();
+    client.close(force: true); // force: also ends a download the time limit gave up on
   }
+}
+
+Future<Uint8List?> _get(HttpClient client, Uri url) async {
+  final response = await (await client.getUrl(url)).close();
+  if (response.statusCode != HttpStatus.ok) return null;
+  return consolidateHttpClientResponseBytes(response);
 }
