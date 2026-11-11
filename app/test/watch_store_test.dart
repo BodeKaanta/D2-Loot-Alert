@@ -13,8 +13,12 @@ class FakePush {
   bool networkUp = true;
   Completer<void>? gate;
   final topics = <String>{};
+  var permissionRequests = 0;
 
-  Future<bool> requestPermission() async => permission;
+  Future<bool> requestPermission() async {
+    permissionRequests++;
+    return permission;
+  }
 
   Future<bool> subscribe(String topic) async {
     await gate?.future;
@@ -153,5 +157,69 @@ void main() {
     expect(store.isWatchingWeapon('spare-rations'), isFalse); // rolled back
     expect(newStore().isWatchingWeapon('spare-rations'), isFalse); // and not saved as watched
     expect(await failure, contains('Spare Rations'));
+  });
+
+  test('a restored watch list subscribes to its topics again at startup', () async {
+    // What a phone restored from a backup has: the saved list, but no subscriptions.
+    SharedPreferences.setMockInitialValues({
+      'watches': jsonEncode({
+        'weapons': [
+          {'id': 'spare-rations', 'itemHash': 123, 'name': 'Spare Rations', 'type': 'Hand Cannon',
+           'category': 'Gambit Ops'},
+        ],
+        'raids': [
+          {'id': 'last-wish', 'name': 'Last Wish', 'kind': 'raid'},
+        ],
+        'armor': [
+          {'id': 'omnioculus', 'name': 'Omnioculus', 'class': 'Hunter', 'slot': 'Chest Armor'},
+        ],
+      }),
+    });
+    prefs = await SharedPreferences.getInstance();
+    final store = newStore();
+
+    await store.resubscribeAll();
+    await store.settled;
+
+    expect(push.permissionRequests, 1); // a restored phone may not have permission yet
+    expect(push.topics, {'weapon_spare-rations', 'raid_last-wish', 'xur_omnioculus'});
+  });
+
+  test('with nothing watched, startup asks for nothing', () async {
+    await newStore().resubscribeAll();
+    expect(push.permissionRequests, 0);
+    expect(push.topics, isEmpty);
+  });
+
+  test('a failed re-subscribe at startup keeps the watch and shows no message', () async {
+    final store = newStore();
+    await store.toggleWeapon(spareRations, 'Gambit Ops');
+    await store.settled;
+    var messages = 0;
+    store.failures.listen((_) => messages++);
+    push.networkUp = false;
+
+    await store.resubscribeAll();
+    await store.settled;
+    await Future<void>.delayed(Duration.zero); // let any message arrive
+
+    expect(store.isWatchingWeapon('spare-rations'), isTrue);
+    expect(messages, 0);
+  });
+
+  test('unwatching right after launch still ends unsubscribed', () async {
+    final store = newStore();
+    await store.toggleWeapon(spareRations, 'Gambit Ops');
+    await store.settled;
+
+    push.gate = Completer<void>(); // a slow network at the next launch
+    final reopened = newStore();
+    await reopened.resubscribeAll();
+    await reopened.toggleWeapon(spareRations, 'Gambit Ops'); // unwatch before the re-subscribe is done
+    push.gate!.complete();
+    await reopened.settled;
+
+    expect(reopened.isWatchingWeapon('spare-rations'), isFalse);
+    expect(push.topics, isEmpty);
   });
 }

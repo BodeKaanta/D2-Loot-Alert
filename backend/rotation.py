@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import alerts
-from bungie import Bungie, BungieError
+from bungie import Bungie
 from game_data import GameData, base_name
 
 BONUS_FOCUS = "daily_grind_guaranteed"  # uiStyle of a bonus focus reward
@@ -46,11 +46,17 @@ CLASS_BANNER_ARMOR = {"Titan": "Heart of Inmost Light", "Hunter": "The Sixth Coy
 # Anything else (e.g. an activity outside the Portal) comes after, alphabetically.
 CATEGORY_ORDER = ["Solo Ops", "Fireteam Ops", "Arena Ops", "Pinnacle Ops", "Crucible Ops", "Gambit Ops"]
 
-# Bump when the shape or IDs of lootPools documents (or the exotic armor catalog)
+# Bump when the shape or IDs of the loot pools (or the exotic armor catalog)
 # change, to force a rebuild even if Bungie's game data hasn't changed.
 # 2 = in-game Portal categories (#8), 3 = weapon ids (#26), 4 = exotic armor catalog (#13),
-# 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13).
-POOLS_SCHEMA = 7
+# 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13),
+# 8 = every pool in one document, catalog/lootPools (bug sweep).
+POOLS_SCHEMA = 8
+
+# A loot pool rebuild where some lookups failed is missing those items, so it isn't
+# saved and the next run tries again. The last try saves it anyway, so an item
+# Bungie never answers for can't hold back every update after it.
+REBUILD_TRIES = 3  # the day's three runs
 
 
 def reset_id(now):
@@ -66,6 +72,21 @@ def week_id(now):
     reset_day = (now - timedelta(hours=RESET_HOUR_UTC)).date()
     days_since_tuesday = (reset_day.weekday() - 1) % 7  # weekday(): Monday = 0, Tuesday = 1
     return (reset_day - timedelta(days=days_since_tuesday)).isoformat()
+
+
+def reset_time(day):
+    """The reset (17:00 UTC) on a day given as 'YYYY-MM-DD'."""
+    return datetime.fromisoformat(day).replace(hour=RESET_HOUR_UTC, tzinfo=timezone.utc)
+
+
+def next_reset(now):
+    """When today's rotation ends: the next daily reset."""
+    return reset_time(reset_id(now)) + timedelta(days=1)
+
+
+def next_weekly_reset(now):
+    """When this week's rotation ends: the next Tuesday reset. Xûr leaves then too."""
+    return reset_time(week_id(now)) + timedelta(days=7)
 
 
 def slug(text):
@@ -212,10 +233,19 @@ def xur_stock(api, now):
     if not xur_is_here(now):
         return []
     try:
-        response = api.request("/Destiny2/Vendors/?components=400,402")
-    except BungieError as err:
-        print(f"Couldn't read Xûr's stock: {err}")  # weapon and raid alerts still go out
+        return read_xur_stock(api)
+    except Exception as err:
+        # Deliberately catches everything: a Bungie error, a timeout, a reply in a
+        # shape we don't expect. Xûr is the least important part of a run, so he's
+        # left out this time and the weapon and raid alerts still go out. The next
+        # run tries him again.
+        print(f"Couldn't read Xûr's stock ({type(err).__name__}): {err}")
         return []
+
+
+def read_xur_stock(api):
+    """His exotic armor, from the public vendors endpoint (see xur_stock())."""
+    response = api.request("/Destiny2/Vendors/?components=400,402")
     vendor = response.get("vendors", {}).get("data", {}).get(str(XUR), {})
     if not vendor.get("enabled", True):
         return []
@@ -395,18 +425,27 @@ def new_alerts(snapshot, state, now):
     to_send = ([a for a in alerts.weapon_alerts(snapshot) if a["topic"] not in sent_weapons]
                + [a for a in alerts.raid_alerts(snapshot) if a["topic"] not in sent_raids]
                + [a for a in alerts.xur_alerts(snapshot) if a["topic"] not in sent_xur])
+    # Each alert expires when what it announces ends: a bonus focus at the next
+    # daily reset, a featured raid or Xûr's stock at the weekly reset. FCM drops it
+    # then, instead of delivering it late to a phone that was off.
+    for alert in to_send:
+        alert["expires"] = next_reset(now) if alert["data"]["kind"] == "weapon" else next_weekly_reset(now)
     return to_send, sent_weapons, sent_raids, sent_xur
 
 
 def save_loot_pools(db, pools):
-    """Write every pool, and delete pools left over from older IDs (e.g. old category names)."""
-    batch = db.batch()
-    for pool_id, pool in pools.items():
-        batch.set(db.document(f"lootPools/{pool_id}"), pool)
-    for old in db.collection("lootPools").list_documents():
-        if old.id not in pools:
-            batch.delete(old)
-    batch.commit()
+    """Every pool in one document, catalog/lootPools, so the app's LOOT tab costs one
+    read instead of one per pool (76 on 2026-11-10).
+
+    About 200 KiB, well under Firestore's 1 MiB per document. The document is
+    replaced whole, so pools that no longer exist go with it. An empty build means
+    Bungie's data changed shape, so the old pools are kept rather than wiped, like
+    the exotic armor catalog.
+    """
+    if not pools:
+        print("Loot pools came back empty; keeping the old ones (check build_loot_pools)")
+        return
+    db.document("catalog/lootPools").set({"pools": sorted(pools.values(), key=lambda p: p["id"])})
 
 
 def save_exotic_armor_catalog(db, catalog):
@@ -419,6 +458,55 @@ def save_exotic_armor_catalog(db, catalog):
         print("Exotic armor catalog came back empty; keeping the old one (check EXOTIC_ARMOR_NODE)")
         return
     db.document("catalog/exoticArmor").set(catalog)
+
+
+def send_new_alerts(snapshot, state, state_ref, now):
+    """Sends the alerts not sent yet this reset or week, and records them in meta/state."""
+    to_send, sent_weapons, sent_raids, sent_xur = new_alerts(snapshot, state, now)
+    accepted = alerts.send(to_send)
+    print(f"Sent {len(accepted)} of {len(to_send)} new alerts")
+    # What has been alerted, so backup runs only send what's new. Only topics FCM
+    # accepted are recorded, so a rejected alert is tried again by the next run.
+    state_ref.set({
+        "sentResetId": snapshot["resetId"],
+        "sentWeaponTopics": sorted(sent_weapons | {t for t in accepted if t.startswith("weapon_")}),
+        "sentWeekId": week_id(now),
+        "sentRaidTopics": sorted(sent_raids | {t for t in accepted if t.startswith("raid_")}),
+        "sentXurTopics": sorted(sent_xur | {t for t in accepted if t.startswith("xur_")}),
+    }, merge=True)
+
+
+def update_loot_pools(api, data, profile, db, state, state_ref):
+    """Rebuilds the loot pools and the exotic armor catalog after a game update.
+
+    They only change when Bungie updates the game data (manifest) or we change
+    their format, and rebuilding them takes a few hundred item lookups, so this
+    does nothing otherwise.
+    """
+    manifest_version = api.manifest_version()
+    if state.get("manifestVersion") == manifest_version and state.get("poolsSchema") == POOLS_SCHEMA:
+        return
+
+    failed_before = api.failed_lookups
+    pools = build_loot_pools(api, data, profile)
+    catalog = build_exotic_armor_catalog(api)
+    failed = api.failed_lookups - failed_before
+    tries = state.get("rebuildTries", 0) + 1
+    if failed and tries < REBUILD_TRIES:
+        # Saving now would drop the items whose lookups failed, and any pool left
+        # empty, until the next game update. Keep the old data; the next run tries again.
+        print(f"{failed} lookups failed rebuilding the loot pools; keeping the old ones and "
+              f"trying again next run (try {tries} of {REBUILD_TRIES})")
+        state_ref.set({"rebuildTries": tries}, merge=True)
+        return
+    if failed:
+        print(f"{failed} lookups still failing after {REBUILD_TRIES} tries; saving the loot pools without them")
+
+    save_loot_pools(db, pools)
+    save_exotic_armor_catalog(db, catalog)
+    state_ref.set({"manifestVersion": manifest_version, "poolsSchema": POOLS_SCHEMA, "rebuildTries": 0},
+                  merge=True)
+    print(f"Rebuilt {len(pools)} loot pools and {len(catalog['armor'])} exotic armor for manifest {manifest_version}")
 
 
 def run(api_key, bungie_name, db):
@@ -438,35 +526,16 @@ def run(api_key, bungie_name, db):
     db.document("rotation/current").set(snapshot)
     db.document(f"history/{snapshot['resetId']}").set(snapshot)
 
-    # Loot pools and the exotic armor catalog only change when Bungie updates the
-    # game data (manifest) or we change their format, and rebuilding them takes a
-    # few hundred item lookups, so skip it otherwise.
     state_ref = db.document("meta/state")
     state = state_ref.get().to_dict() or {}
-    manifest_version = api.manifest_version()
-    if state.get("manifestVersion") != manifest_version or state.get("poolsSchema") != POOLS_SCHEMA:
-        pools = build_loot_pools(api, data, profile)
-        save_loot_pools(db, pools)
-        catalog = build_exotic_armor_catalog(api)
-        save_exotic_armor_catalog(db, catalog)
-        print(f"Rebuilt {len(pools)} loot pools and {len(catalog['armor'])} exotic armor for manifest {manifest_version}")
+    # Alerts first. The loot pool rebuild after them only runs after a game update,
+    # when Bungie's servers are often struggling, and if it fails it mustn't take
+    # the day's alerts down with it.
+    send_new_alerts(snapshot, state, state_ref, now)
+    update_loot_pools(api, data, profile, db, state, state_ref)
 
-    to_send, sent_weapons, sent_raids, sent_xur = new_alerts(snapshot, state, now)
-    accepted = alerts.send(to_send)
-    print(f"Sent {len(accepted)} of {len(to_send)} new alerts")
-
-    state_ref.set({
-        "manifestVersion": manifest_version,
-        "poolsSchema": POOLS_SCHEMA,
-        "lastResetId": snapshot["resetId"],
-        "lastRunAt": now.isoformat(),
-        # What has been alerted, so backup runs only send what's new.
-        "sentResetId": snapshot["resetId"],
-        "sentWeaponTopics": sorted(sent_weapons | {t for t in accepted if t.startswith("weapon_")}),
-        "sentWeekId": week_id(now),
-        "sentRaidTopics": sorted(sent_raids | {t for t in accepted if t.startswith("raid_")}),
-        "sentXurTopics": sorted(sent_xur | {t for t in accepted if t.startswith("xur_")}),
-    }, merge=True)
+    # Written last, so a fresh lastRunAt means the whole run worked.
+    state_ref.set({"lastResetId": snapshot["resetId"], "lastRunAt": now.isoformat()}, merge=True)
 
 
 def dry_run():
@@ -494,7 +563,8 @@ def dry_run():
     out = Path(__file__).parent / "output"
     out.mkdir(exist_ok=True)
     (out / "snapshot.json").write_text(json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
-    (out / "alerts.json").write_text(json.dumps(to_send, indent=2, ensure_ascii=False), encoding="utf-8")
+    # default=str writes each alert's expiry time as text.
+    (out / "alerts.json").write_text(json.dumps(to_send, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
     if "--skip-pools" not in sys.argv:
         print("Building loot pools (takes a few minutes)...")
@@ -504,6 +574,8 @@ def dry_run():
         catalog = build_exotic_armor_catalog(api)
         print(f"{len(catalog['armor'])} exotic armor in the catalog; banners: {catalog['classImages']}, Xûr: {catalog['xurImage']}")
         (out / "exotic_armor.json").write_text(json.dumps(catalog, indent=2, ensure_ascii=False), encoding="utf-8")
+    if api.failed_lookups:
+        print(f"{api.failed_lookups} Bungie lookups failed, so those items are missing above")
     print(f"Saved to {out}")
 
 

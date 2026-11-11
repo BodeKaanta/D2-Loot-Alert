@@ -302,7 +302,7 @@ Flutter app (Android + iOS)
   | Cloud Functions (Cloud Run) | 3 short runs a day | 2M requests, 180k vCPU-seconds, 360k GiB-seconds a month |
   | Cloud Scheduler | 1 job (one cron with 3 times) | 3 jobs per billing account |
   | Secret Manager | 2 secrets | 6 active secret versions, 10k accesses a month |
-  | Firestore | a handful of writes per run; app reads | 50k reads, 20k writes a day |
+  | Firestore | a handful of writes per run; about 3 reads per app launch (bug sweep) | 50k reads, 20k writes a day |
   | Artifact Registry | build images from deploys | 0.5 GB storage, kept low by a cleanup policy |
   | FCM | pushes | free |
 
@@ -322,7 +322,7 @@ Flutter app (Android + iOS)
   - **Timeout** 540 s, **memory** 512 MB. A normal run takes seconds; rebuilding loot pools after a game update takes about 2–3 minutes.
   - **Logs:** Firebase console → Functions → `daily_rotation` → Logs, or Google Cloud Logging.
   - **Test without waiting for reset:** Google Cloud console → Cloud Scheduler → job `firebase-schedule-daily_rotation-us-central1` → ⋮ → **Force run**. (`gcloud` isn't installed on Bode's PC.)
-  - **Check results without credentials:** Firestore allows public reads, so `GET https://firestore.googleapis.com/v1/projects/d2-loot-alert/databases/(default)/documents/rotation/current` works. `meta/state` is written last, so if it has a fresh `lastRunAt`, the whole run succeeded.
+  - **Check results without credentials:** Firestore allows public reads, so `GET https://firestore.googleapis.com/v1/projects/d2-loot-alert/databases/(default)/documents/rotation/current` works. `lastRunAt` in `meta/state` is written last, so if it's fresh, the whole run succeeded, including any loot pool rebuild.
   - **The function's URL is private.** Unauthenticated calls get 403; only Cloud Scheduler can invoke it. Keep it that way. Never make the invoker public, or strangers could trigger runs.
 - **Secrets** (Cloud Secret Manager, set with `firebase functions:secrets:set <NAME>`):
   - `BUNGIE_API_KEY`
@@ -343,6 +343,10 @@ Flutter app (Android + iOS)
   - **A deploy can fail once in `loadCodebases`** (the CLI's local step that loads the Python function), with only a stack trace. It happened on 2026-10-19, and an immediate retry worked.
   - **When Claude deploys,** use `--non-interactive --force` because its shell can't answer prompts. `--force` only bypasses prompts here; there are no other functions it could delete.
 - **Idempotent:** each run for the same reset overwrites the same documents. **Reset ID** is the date of the most recent 17:00 UTC reset, e.g. `2026-10-17`.
+- **Order of a run** (pre-release bug sweep, 2026-11-10): snapshot → `rotation/current` and `history` → alerts, recorded in `meta/state` → the loot pool rebuild, only after a game update → `lastRunAt`.
+  - **Alerts never wait on the rebuild.** It's a few hundred Bungie lookups and only runs after a game update, when Bungie's servers are often struggling. Before the sweep it ran first, so one network timeout in it stopped the run before any alert went out, and every backup run repeated it.
+  - **A rebuild where any lookup failed isn't saved** (`failed_lookups`, counted in `bungie.py`). Saving it would drop those items, and any pool left empty, until the next game update. The next run tries again (`rebuildTries` in `meta/state`), and the third try (`REBUILD_TRIES`) saves it anyway, so an item Bungie never answers for can't block every later update. Look for "lookups failed rebuilding the loot pools" in the logs.
+  - **Xûr can't stop a run:** `xur_stock()` catches every error (Bungie's, a timeout, an unexpected reply), leaves him out of that run and logs "Couldn't read Xûr's stock".
 - **Firestore layout** (finalized in #6):
 
   | Path | Holds |
@@ -350,13 +354,14 @@ Flutter app (Android + iOS)
   | `rotation/current` | `resetId`, `updatedAt`, `activities[]`, `featured[]`, `raidsAndDungeons[]` (every farmable-capable raid and dungeon, same entry shape and IDs as `featured`; Pantheon and the newest raid and dungeon are left out), `xur[]` (the exotic armor Xûr is selling, empty when he's not in the game, #13) |
   | `catalog/exoticArmor` | `armor[]`: every exotic armor piece, for the app's Xûr screen, plus `xurImage` and `classImages` (the cards' banners) (#13). Rebuilt along with the loot pools; an empty build keeps the old list. |
   | `history/{resetId}` | a copy of each reset's last snapshot |
-  | `lootPools/{id}` | one activity group's weapons, from its definitions' `rewards`. Rebuilt only when the manifest version or `POOLS_SCHEMA` (in `rotation.py`) changes; a rebuild also deletes pools whose IDs no longer exist. |
-  | `meta/state` | `manifestVersion`, `poolsSchema`, `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`, `sentXurTopics`) |
+  | `catalog/lootPools` | `pools[]`: every activity group's weapons, from its definitions' `rewards`, sorted by `id` (bug sweep). One document, so LOOT costs one read instead of one per pool; 198 KiB of the 1 MiB limit on 2026-11-10 (the biggest pool, Defiant Battleground: EDZ, is 5.3 KiB). Rebuilt only when the manifest version or `POOLS_SCHEMA` (in `rotation.py`) changes, and replaced whole, so pools that no longer exist go with it. An empty build keeps the old one; one with failed lookups is retried first (see Order of a run). |
+  | `lootPools/{id}` | the old layout, one document per pool. No longer written since the bug sweep, but app builds from before it still read it. Delete it once the iPad and Pixel run the new app, and remove it from `firestore.rules`. |
+  | `meta/state` | `manifestVersion`, `poolsSchema`, `rebuildTries` (failed rebuild tries so far), `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`, `sentXurTopics`) |
 
   - An **activity group** has an `id` (e.g. `gambit-ops-gambit`), `name`, `category` (the in-game Portal category), `image` (a real banner when one exists), `activityHashes[]` and `weapons[]`.
     - The `id` is the slug of category + base name, so the Today screen's entries link to their loot pool by the same `id`.
     - `activities[]` is sorted in the game's Portal order (`CATEGORY_ORDER`: Solo, Fireteam, Arena, Pinnacle, Crucible, Gambit Ops), then anything else alphabetically, then by name. The app keeps that order.
-    - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool or catalog shape change. 2 = Portal categories (#8), 3 = weapon `id`s (#26), 4 = exotic armor catalog (#13), 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13).
+    - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool or catalog shape change. 2 = Portal categories (#8), 3 = weapon `id`s (#26), 4 = exotic armor catalog (#13), 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13), 8 = every pool in one document, `catalog/lootPools` (bug sweep).
   - An **exotic armor** entry has `id` (name slug), `itemHash`, `name`, `class` (Titan, Hunter or Warlock), `slot` (e.g. "Chest Armor") and `icon`.
     - Xûr's stock also has `screenshot`, for the alert.
     - Accented letters become hyphens in slugs: Mataiodoxía → `mataiodox-a`. It's consistent everywhere, so leave it; changing `slug()` would change existing topics.
@@ -367,7 +372,9 @@ Flutter app (Android + iOS)
   - A **featured** entry has `id`, `name`, `kind` (`raid` or `dungeon`), `image` and `activityHashes[]`.
   - Only rotator-featured, farmable raids and dungeons appear (see Phase 0 findings). The newest raid and dungeon don't.
 
-- **Security rules** (`firestore.rules`): anyone can read, nobody can write. The backend writes through the Admin SDK, which ignores rules.
+- **Security rules** (`firestore.rules`): anyone can read the public collections (`rotation`, `catalog`, `history`, `meta`, and the old `lootPools` until it's deleted), everything else is private, and nobody can write. The backend writes through the Admin SDK, which ignores rules.
+  - **A list, not "everything"** (bug sweep): so a future collection holding something private, like the OAuth token the vendor-alert idea needs (which belongs in Secret Manager anyway), isn't public by accident. A new collection the app reads must be added to the list.
+  - `firebase deploy --only firestore:rules --dry-run` checks that they compile without publishing them.
 
 ### Push notifications
 
@@ -403,15 +410,18 @@ Flutter app (Android + iOS)
   - **Images:** the armor icon collapsed, the armor's screenshot expanded.
   - **Tapping it** opens Today, where his stock is listed.
   - A visit runs Friday reset to Tuesday reset, inside one week ID, so it shares `sentWeekId` with raids.
-  - **No stock** means no Xûr alerts: outside his Friday-to-Tuesday window, or when the vendors call fails. The weapon and raid alerts still go out.
+  - **No stock** means no Xûr alerts: outside his Friday-to-Tuesday window, or when reading his stock fails in any way. The weapon and raid alerts still go out.
 - **Never twice:** `meta/state` stores `sentResetId` + `sentWeaponTopics` and `sentWeekId` + `sentRaidTopics` + `sentXurTopics`.
   - **Week ID** is the date of the most recent Tuesday 17:00 UTC reset.
   - A run only sends topics that aren't recorded yet for the current reset or week. Only topics FCM accepted get recorded, so failures retry on the next backup run.
+- **Alerts expire** when what they announce ends (bug sweep): a weapon alert at the next daily reset, a raid, dungeon or Xûr alert at the next weekly reset (`next_reset()`, `next_weekly_reset()`).
+  - `new_alerts()` puts the time in each alert's `expires`, and `send()` turns it into Android's `ttl` and APNs's `apns-expiration` header (`expiry_options()`).
+  - Without it, FCM keeps an alert for 4 weeks, so a phone that was off for days got "is a bonus drop today" long after it stopped being true.
 - **Images on iOS** (#17, #31): the backend sets `mutable-content` and `fcm_options.image` (the icon, or a raid's banner) for the thumbnail, and `aps.category = "banner"` for the expanded banner. `ios_options()` in `alerts.py` picks them.
 - **Android priority is `high`** (#28). Without it, the 2026-10-18 alerts sat with FCM while the Pixel was in Doze. FCM accepted 12, but only one (Hammerhead) arrived, 50 minutes late, when the phone was picked up.
   - **Notification messages are always collapsible** and share one default collapse key (the app's package name), so FCM keeps only the newest one it's holding for a device.
   - High priority is delivered right away, even in Doze, so nothing waits to be collapsed. It's meant for messages that show a notification, which ours always do.
-  - Since #30, Android gets data messages, which aren't collapsible. A phone that's fully offline at reset gets every alert when it reconnects. FCM stores up to 100 per device.
+  - Since #30, Android gets data messages, which aren't collapsible. A phone that's fully offline at reset gets every alert that hasn't expired when it reconnects. FCM stores up to 100 per device.
   - High priority still matters: normal-priority data messages also wait out Doze.
   - **Known limit on iOS:** APNs stores only the newest notification for a device that's offline.
 - **Checking delivery on the Pixel** (no app logging needed):
@@ -424,7 +434,7 @@ Flutter app (Android + iOS)
   4. Force run the scheduler job. Then read the post times as above.
   5. Undo: `adb shell dumpsys deviceidle unforce` and `adb shell dumpsys battery reset`.
 - **iOS** also needs an APNs auth key (.p8) uploaded to Firebase, plus the Push Notifications capability in Xcode. Done in #8, along with registering the apps through `flutterfire configure`.
-- **Tests:** run `python -m unittest discover backend` from the repo root (36 tests, standard library only). They cover the reset and week math, alert wording and data, the iOS thumbnail and category, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories, the last two on tiny hand-made tables. Test files are excluded from deploys in `firebase.json`.
+- **Tests:** run `python -m unittest discover backend` from the repo root (43 tests, standard library only; add `-b` to hide the code's printed output). They cover the reset and week math, alert wording, data and expiry, the iOS thumbnail and category, deduplication, weapon ids across versions, the farmable check, the raid catalog, banner fallbacks and Portal categories (the last two on tiny hand-made tables), and `run()`'s order with Bungie, Firestore and FCM faked (`Run`). Test files are excluded from deploys in `firebase.json`.
 - **Local check of FCM messages:** `rotation.py --dry-run --skip-pools` writes `backend/output/alerts.json`.
 - **Watch types are simplified** to "weapon, in any activity and any version", "raid or dungeon", and "exotic armor Xûr sells" (#13). A weapon's alert fires wherever it's the bonus focus, and the message says where.
 
@@ -458,6 +468,9 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
 - **Tabs** (bottom, `AppTabBar`, **three equal thirds** so LOOT sits in the middle, as Bode asked): **TODAY / LOOT / RAIDS & DUNGEONS**. "RAIDS &" / "DUNGEONS" is stacked on two lines (Bode: it crowded the screen edge; stacking also keeps one text size on narrower iPhones). Every tab has the same two-line label area, so the underlines line up. The last name matches the game's wording (Bode). `IndexedStack` keeps each tab's scroll position.
 - **Today:** a live listener on `rotation/current` (`snapshots()`), so it updates itself when the backend writes. Pull-to-refresh forces a server read.
   - **Under the title and countdown, a separating line** (#34, Bode): exotic gold (`AppColors.exotic`), 1.5 pt thick. The gold sets it apart from the section headers' 1 pt grey rules (Bode's pick after trying grey, and 1, 2 and 4 pt).
+  - **An out-of-date note** under that line (bug sweep, Bode asked): from reset until the backend saves the new rotation (about 7 minutes, or hours if Bungie is down), a box says "Not updated for today's reset yet…".
+    - `isOutOfDate()` in `reset.dart` compares the rotation's `resetId` with the device's latest reset (`currentResetId()`).
+    - The note re-checks every minute, so it also appears when reset happens with the app open. The live listener brings the new rotation, which hides it.
   - **READY TO FARM first** (#34, name picked by Bode): **copies** of everything watched that can be farmed right now.
     - Bonus focus activity cards with a watched weapon, each showing its category. A weapon in two activities shows both cards.
     - Watched featured raids and dungeons, each card labelled RAID or DUNGEON.
@@ -482,7 +495,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
         - The XÛR card on LOOT uses `Alignment(0, -0.6)` in `loot_screen.dart`, so his head isn't cut off.
       - Bode was offered the official class symbols (they're in the data, as Collections node icons) but kept the screenshots: the symbols are Bungie branding, which the art rules exclude.
     - The cards are the shared `LinkCard` widget, the same as the category cards.
-  - `buildCategoryLoot()` merges the `lootPools` docs per category, listing each weapon once by `id`, so it's watched from one row (#26). The main pool is the weapon list most activities share. Weapons outside it are labeled "<activity> only" (e.g. Trials of Osiris, Sparrow Racing League, Warden of Nothing), which also covers Iron Banner or Trials-specific focus later.
+  - `buildCategoryLoot()` merges the pools from `catalog/lootPools` (`LootPool.allIn()`) per category, listing each weapon once by `id`, so it's watched from one row (#26). The main pool is the weapon list most activities share. Weapons outside it are labeled "<activity> only" (e.g. Trials of Osiris, Sparrow Racing League, Warden of Nothing), which also covers Iron Banner or Trials-specific focus later.
   - **Only the Portal categories are shown** (`portalCategories`, kept in sync with `CATEGORY_ORDER` in `rotation.py`). That hides the one-off Campaign, Story and World quest weapons (Bode).
 - **Raids & Dungeons:** FEATURED THIS WEEK (grid with bells), then ALL RAIDS and ALL DUNGEONS as slim banner rows with bells. These come from `rotation/current.raidsAndDungeons`; featured ones are labeled in gold.
 - **Watching** (`WatchStore`, a `ChangeNotifier` read through `WatchScope.of(context)`):
@@ -492,14 +505,17 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
     - **If it fails,** the change is undone (unless a later tap already reversed it) and a message goes out on `WatchStore.failures`. `main.dart` shows those through a global `ScaffoldMessenger` key, on whatever screen is open.
   - **The first watch asks for notification permission.** That's the only time a tap waits; once granted, it isn't asked again in that session. If it's denied, nothing is watched.
   - **Firebase calls are injected,** so `test/watch_store_test.dart` runs with fakes, including a "slow network" gate to prove the bell updates before the network answers.
-  - **A reinstall starts with an empty list** (a new install gets new FCM registrations anyway).
+  - **At startup, `resubscribeAll()`** subscribes to every watched topic again, in the background (bug sweep).
+    - **Why:** phone backups bring the saved list back (iCloud on a new iPhone; Android's Auto Backup on a new phone or after a reinstall), but not the subscriptions, which belong to the old install. A restored phone's bells said "watching" while no alerts came.
+    - It also asks for notification permission, which only shows a prompt if this install never answered. Failures are silent; the next launch tries again.
+  - **An iOS reinstall starts with an empty list,** since deleting the app deletes its data.
 - **Tapping a push** (`HomeScreen`) switches the tab by the alert's `kind`: `weapon` and `xur` → Today, `raid`/`dungeon` → Raids & Dungeons.
   - **Android alerts** (drawn by the app, #30): `launchedFromAlert()` (app was closed) and `alertTaps` (app was running), both from `notifications.dart`.
   - **Notifications FCM draws itself** (iOS alerts, console test pushes): `getInitialMessage()` and `onMessageOpenedApp`.
 - **Alerts drawn by the app** (`notifications.dart`, #30):
   - **Background:** `onBackgroundAlert` runs in a separate background isolate (a fresh Dart instance) when the app isn't open. It must stay a top-level function with `@pragma('vm:entry-point')`.
   - **Foreground:** alerts that arrive while the app is open are drawn too, through `onMessage`.
-  - **Images:** both are downloaded in parallel with a timeout. If one fails, the alert shows without it.
+  - **Images:** both are downloaded in parallel, each within one 10 s limit that also covers waiting for the server to answer. If one fails, the alert shows without it. (Before the bug sweep only the body had a limit, so a server that stalled after connecting could hold up the alert.)
   - **Channel:** our own "Bonus drops", high importance so alerts pop up. The manifest's `default_notification_channel_id` points FCM's own notifications (console tests) at it too, instead of FCM's "Misc".
   - **Small icon:** `@drawable/ic_notification`, a white silhouette of the app icon (#42; see Design system > App icon).
   - **iOS:** everything in `notifications.dart` is Android-only, apart from the foreground setting. iOS taps reach `onMessageOpenedApp` (see iOS > Notification delegate).
@@ -511,7 +527,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Why:** `Image.network` downloads once. After a failure it shows its error widget and never tries again, because rebuilding it with the same URL changes nothing. Seen on LOOT on 2026-10-27 (three black category cards) and on the iPad on 2026-11-09, when *every* Bungie image was blank while the text showed from Firestore's on-device cache. A restart fixed both.
   - **How:** it wraps an `Image` keyed by an attempt counter. A retry evicts the failed image from Flutter's image cache, then bumps the key, so a fresh `Image` downloads again. Retries come 2, 4, 8, 16 and 32 s after a failure, then it stops; returning to the app (lifecycle `resumed`) retries any failed image, even after it gave up. `errorBuilder` runs during a build, so it only schedules the retry; `setState` happens in the timer.
   - Used by `BannerImage` (activity, raid, LOOT and XÛR banners) and `ItemTile` (weapon and armor icons). The notification extensions download their own images.
-- **Tests:** `flutter test` (24 tests: models, category loot, READY TO FARM, reset math, watch store, image retry) and `flutter analyze`, both clean as of #43. `flutter_test` answers every HTTP request with 400, which the image retry tests rely on.
+- **Tests:** `flutter test` (30 tests: models, category loot, READY TO FARM, reset math and the out-of-date check, watch store and the startup re-subscribe, image retry) and `flutter analyze`, both clean as of the bug sweep. `flutter_test` answers every HTTP request with 400, which the image retry tests rely on.
 
 ### Design system (agreed with Bode in #8)
 
@@ -617,7 +633,7 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
      - **Ad hoc build for Bode's iPad** (what it runs day to day until TestFlight, #10): `flutter build ipa --release --export-method ad-hoc` in `app/`, then `xcrun devicectl device install app --device <UDID> <Runner.app>`, with `Runner.app` taken from the `Payload/` folder inside `build/ios/ipa/*.ipa` (unzip it).
        - Xcode creates the ad hoc profile automatically. It only covers devices registered to the developer account (the iPad is), so it can't go to the friend. The 2026-11-07 profile expires 2027-09-04.
        - Check it with `codesign -d --entitlements - --xml Payload/Runner.app`: `aps-environment` should be `production`.
-       - After installing over a development build, open the app and re-tap the bells, so the topics are tied to the new production push token.
+       - After installing over a development build, open the app once. It subscribes to the watched topics again at startup (bug sweep), which ties them to the new production push token. Before, the bells had to be tapped again.
        - **After an icon change, restart the iPad.** Reinstalling updates the home-screen icon, but iOS can keep showing the old one on notifications (seen 2026-11-09: the Flutter icon). A restart fixed it. App Store installs are fresh and don't hit this.
        - **Installing needs the iPad unlocked.** Otherwise `devicectl` fails with "The developer disk image could not be mounted… the device was still locked".
        - **Real-world check, 2026-11-08:** the 17:07 UTC reset alert reached the iPad with the weapon icon, with no Mac attached.
@@ -665,6 +681,7 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #34 | Today: READY TO FARM section with what you watch that's available now | S | Done |
 | #36 | Bug: Xûr's stock keeps showing (and re-alerting) after he leaves on Tuesday | S | Done |
 | #38 | Update the README now that the Android app works | S | Done |
+| — | Pre-release bug sweep: alerts before the pool rebuild, alert expiry, startup re-subscribe, out-of-date note (branch `bug_check_1`) | M | In progress |
 | later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
 
@@ -678,11 +695,26 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-11-10, everything through #44 is merged into `main`, and `main` matches what's deployed.
+As of 2026-11-10, everything through #44, plus #10's PRs #49 and #50, is merged into `main`, and `main` matches what's deployed.
 
 **Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 image retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
 
-- **In progress: #10**, the App Store release, in several PRs, so issue #10 stays open until the app is submitted. The release settings (iPhone-only, portrait, encryption, launch screen) were PR #49 (merged). The listing, screenshots script and donation decision are on branch `task_10_store_listing`. See Next tasks below for the steps.
+- **In progress: the pre-release bug sweep** on branch `bug_check_1` (2026-11-10, see the Decision log). Every fix, all loot pools in one document included, is reviewed by Bode, committed and pushed, and the PR is open. **Waiting on Bode to merge it,** then the rollout steps below.
+  - **The fixes:**
+    - **Backend:** alerts before the loot pool rebuild, rebuild retries, Xûr can't stop a run, and alert expiry (Backend > Order of a run, Push notifications > Alerts expire).
+    - **App:** `resubscribeAll()` at startup, TODAY's out-of-date note, and the Android image download limit.
+    - **Other:** `firestore.rules` lists the public collections, and the App Review notes point to a screen recording.
+  - **All loot pools in one document** (Bode chose this, option (b), on 2026-11-10).
+    - Every app launch used to read about 78 documents, 76 of them `lootPools`, because `IndexedStack` builds LOOT at launch and LOOT listened to the whole collection. Opening the app again after 30+ minutes read them all again.
+    - Now the backend writes `catalog/lootPools` (198 KiB), and a launch reads about 3. The free 50k reads a day covers about 16,000 launches instead of 640.
+    - Decided before v1, because installed copies keep reading whatever layout they shipped with. (The other option was building LOOT only when its tab is first opened.)
+  - **After merging, in this order:**
+    1. Deploy: `firebase deploy --only functions,firestore:rules`.
+    2. Force run the scheduler job, or wait for 17:07 UTC. `POOLS_SCHEMA` 8 makes it write `catalog/lootPools`; check it with a public GET of `.../documents/catalog/lootPools`.
+    3. Build the App Store upload from `main` (#10 below). Before step 2, its LOOT tab would have no categories.
+    4. Install the new build on the iPad and the Pixel. Until then their old builds keep reading the old `lootPools` collection, which no longer updates.
+    5. Delete the old `lootPools` collection (Firebase console → Firestore → `lootPools` → ⋮ → Delete collection), and remove it from `firestore.rules`.
+- **In progress: #10**, the App Store release, in several PRs, so issue #10 stays open until the app is submitted. The release settings (iPhone-only, portrait, encryption, launch screen) were PR #49, and the listing, screenshots script and donation decision PR #50 (both merged). See Next tasks below for the steps.
 - **#44 (privacy policy and support page) is done** (PR #48). GitHub Pages serves `main`'s `/docs` folder (turned on by Bode, 2026-11-10). Both pages are live, and About's PRIVACY POLICY and PROJECT PAGE AND SOURCE CODE buttons open them (checked on the iPad by Bode). These URLs go into App Store Connect:
   - Support: `https://bodekaanta.github.io/D2-Loot-Alert/`
   - Privacy policy: `https://bodekaanta.github.io/D2-Loot-Alert/privacy/`
@@ -693,7 +725,7 @@ As of 2026-11-10, everything through #44 is merged into `main`, and `main` match
 - **#17 (iOS setup) is done.** Bode's iPad runs an ad hoc build (see iOS > Running on the iPad), and real reset alerts arrive with the weapon icon (2026-11-08).
 - **#36 checked:** the 18:34 UTC Force run that Tuesday wrote `xur: []`, and TODAY's XÛR section went away (Bode). His return is first checked at Friday's 17:07 UTC run.
 - **#13 (Xûr) was checked on the Pixel on 2026-10-19:** Xûr alerts for belled pieces arrived. The XÛR screens, card art and TODAY section looked right (Bode).
-  - **Still to watch:** the first Friday arrival (17:07 UTC run). The Tuesday departure was answered by #36.
+  - **Friday arrivals look right:** `history` shows new stock on 2026-10-23, 10-30 and 11-06, unchanged through each visit (checked 2026-11-10). Whether the 17:07 run itself already saw the new stock can't be told from `history`, since the 21:07 run overwrites it; the function's logs would say. The Tuesday departure was answered by #36.
 - **#30 was tested on 2026-10-19 with the forced-Doze recipe,** with the app's process stopped (`am kill`) so alerts start it from cold.
   - 8 alerts were posted within 2 s, on the "Bonus drops" channel.
   - Weapons: icon collapsed, banner expanded. Reckless Endangerment (Typhon Imperator) expands to its screenshot.
@@ -723,14 +755,33 @@ As of 2026-11-10, everything through #44 is merged into `main`, and `main` match
      - **Apple risk:** guideline 5.2 (third-party content). The review notes say the images and data come from Bungie's official API under its non-commercial terms. No "Destiny" in the keywords (guideline 2.3.7).
      - **Screenshots** (done 2026-11-10): `tool/screenshots.sh <simulator id>` in `app/` writes 5 PNGs to `app/build/screenshots/` (TODAY with READY TO FARM, TODAY at BONUS FOCUS, LOOT, Fireteam Ops' weapons, RAIDS & DUNGEONS).
        - Use the **iPhone 18 Pro Max** simulator (`xcrun simctl list devices`): its screen is exactly Apple's 6.9" size, 1320×2868.
-       - The script sets the status bar to 9:41 with full battery, then runs `integration_test/screenshots_test.dart`. That test saves a watch list built from today's rotation (3 weapons from different categories, each the focus in only one activity with a banner, plus a featured raid or dungeon, plus a Xûr piece if he's there), starts the real app, and walks the tabs. It prints `SCREENSHOT:<name>` on each screen, and the script captures it with `xcrun simctl io <id> screenshot`.
+       - The script sets the status bar to 9:41 with full battery, then runs `integration_test/screenshots_test.dart`. That test saves a watch list built from today's rotation (3 weapons from different categories, each the focus in only one activity with a banner, plus a featured raid or dungeon, plus a Xûr piece if he's there), starts the app's UI (`LootAlertApp`, without `main()`'s startup re-subscribe, whose permission prompt nobody could dismiss), and walks the tabs. It prints `SCREENSHOT:<name>` on each screen, and the script captures it with `xcrun simctl io <id> screenshot`.
        - **Why it's automated:** Xcode 27.2 on the Mac has no Simulator window app (not in the bundle, no Open Developer Tool menu), so nobody can tap in the simulator.
        - The watch list is saved directly instead of tapped, because a tap shows iOS's notification permission dialog. It doesn't subscribe to any topics.
        - `integration_test` (a Flutter SDK package, dev only) was added for it, with Bode's OK.
-     - **Still to do:** Bode's review of the listing and screenshots, the EU trader status (not a trader), upload, internal TestFlight for the roommate, submit.
+     - **Upload a fresh build** (found in the bug sweep).
+       - Right before uploading, run `flutter build ipa --release` in `app/` from a clean `git status` on `main`.
+       - Then check that `/usr/libexec/PlistBuddy -c 'Print :UIDeviceFamily' build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Info.plist` prints only `1`.
+       - On 2026-11-10 the archive in `build/ios/` was the iPad ad hoc build (iPhone and iPad, landscape, no encryption key). Uploading it would have shipped iPad support for good.
+     - **Screen recording for App Review** (the Attachment in App Review Information): a reviewer can't trigger an alert, since the bonus focus changes at every reset.
+       - Record on the iPad, not the Pixel: Apple is reviewing the iOS app, and Android in the video would show another platform.
+       - **Done:** Bode recorded it on the iPad on 2026-11-10. AirDrop it to the Mac and attach it on the version's page in App Store Connect, under App Review Information. Attachments belong to one version, so a later version needs it attached again.
+       - **Bode records it; Claude can't.** Nothing on the Mac can record or tap a real iPad's screen, and the alert has to be a real push.
+       - Steps:
+         1. Start the iPad's screen recording (Control Center → Screen Recording).
+         2. Open the app and tap the bell on a weapon in today's BONUS FOCUS. Wait a minute so the subscription takes effect.
+         3. In the Firebase console: Firestore → `meta` → `state` → `sentWeaponTopics`, and delete that weapon's entry (e.g. `weapon_fair-judgment`), so the next run sends its alert again.
+         4. Google Cloud console → Cloud Scheduler → `firebase-schedule-daily_rotation-us-central1` → ⋮ → **Force run**.
+         5. On the iPad, go to the home screen and wait for the alert (usually under a minute). Long-press it for the banner, then tap it to open TODAY.
+         6. Stop the recording and trim it in Photos.
+       - If the alert doesn't show up in the recording, turn on Settings → Notifications → Screen Sharing → Allow Notifications.
+       - Removing one topic resends only that weapon's alert (to everyone watching it, which before release is only Bode). Deleting all of `meta/state` would also resend every other alert and rebuild the pools.
+     - **Still to do:** Bode's review of the listing and screenshots, attaching the screen recording, the EU trader status (not a trader), upload, internal TestFlight for the roommate, submit.
      - **What Bode does in App Store Connect** (Claude gives the clicks): create the app record (name, bundle ID `com.id0.d2lootalert`, SKU), paste the listing, screenshots, privacy and support URLs, category, Free, countries, the App Privacy and age-rating questionnaires, the EU trader declaration (not a trader), upload the build from Xcode's Organizer, add the roommate as an internal TestFlight tester, submit. An individual account shows Bode's legal name as the seller. No banking or tax setup for a free app.
   2. **#45** signed Android APK.
 - **Keep an eye on:**
+  - **After the next game update,** check the function's logs for "lookups failed rebuilding the loot pools". If it shows on every try, some item never answers, and the pools only save on the third run.
+  - **Delete the old `lootPools` collection** once the iPad and Pixel run the new app, then drop it from `firestore.rules` (bug sweep's step 5 above).
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
   - **The iPad's ad hoc build expires 2027-09-04.** Rebuild and reinstall before then (iOS > Running on the iPad), or move the iPad to TestFlight with #10.
   - "Still open (minor)" above.
@@ -815,6 +866,16 @@ As of 2026-11-10, everything through #44 is merged into `main`, and `main` match
 - **2026-11-10:** **The privacy policy and support page live in this repo's `docs/`, published with GitHub Pages** (#44), not a separate repo. They stay next to the code they describe and are reviewed in the same PRs. If the repo ever goes private, Pages on a free account stops working, so the policy would need a new home first.
 - **2026-11-10:** **Public contact is a dedicated address, `d2lootalert@gmail.com`**, not Bode's personal email, which would be harvested from the public pages and the App Store. It can forward to Bode's inbox.
 - **2026-11-10:** **The privacy policy promises no analytics, ads, tracking or accounts.** The built app was checked: no Google Analytics library is linked (`IS_ANALYTICS_ENABLED` is false). Firebase Installations and FCM tokens are the only identifiers, used to deliver notifications. Adding any SDK that collects data means updating the policy first.
+- **2026-11-10:** **Pre-release bug sweep, all on one branch** (Bode). Before the App Store upload, Claude reviewed the whole codebase: no security holes, and no secret anywhere in the git history. Bode asked for every fix on `bug_check_1` together, as a one-time exception to one task per branch.
+  - **Alerts go out before the loot pool rebuild,** so a failing rebuild can't block them.
+  - **A rebuild with failed lookups is retried,** and the third try saves it anyway.
+  - **Xûr can never stop a run.**
+  - **Alerts expire** at the reset that ends them.
+  - **The app re-subscribes to its watched topics at every launch,** because phone backups restore the list without the subscriptions.
+  - **TODAY says when it still shows the previous reset's rotation** (Bode).
+  - **The Firestore rules list the public collections** instead of allowing everything.
+  - **All loot pools in one document,** `catalog/lootPools` (Bode chose this over building LOOT only when opened): a launch reads about 3 documents instead of 78. Decided before v1, since installed copies keep reading the layout they shipped with.
+  - **App Review gets a screen recording** of a real alert, since a reviewer can't trigger one.
 - **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
   - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.
   - **Topics** are `xur_<name slug>`, like weapons (#26 showed hashes aren't stable).

@@ -32,7 +32,10 @@ void main() {
 
   testWidgets('store screenshots', (tester) async {
     await _watchSomethingFromToday();
-    await app.main();
+    // The app as main() starts it, minus the startup re-subscribe: that asks for
+    // notification permission, and in the simulator nobody can answer the prompt.
+    final watches = WatchStore(await SharedPreferences.getInstance());
+    runApp(app.LootAlertApp(watches: watches, messenger: GlobalKey<ScaffoldMessengerState>()));
     await _wait(tester, const Duration(seconds: 2));
 
     // 1. TODAY, with READY TO FARM at the top.

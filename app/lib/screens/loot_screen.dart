@@ -16,14 +16,15 @@ import 'xur_screen.dart';
 class LootScreen extends StatelessWidget {
   const LootScreen({super.key});
 
-  static final _pools = FirebaseFirestore.instance.collection('lootPools');
+  /// Every activity's pool, all in one document (1 read instead of one per pool).
+  static final _pools = FirebaseFirestore.instance.doc('catalog/lootPools');
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        // The pools only change after a game update, but a live listener costs nothing extra.
-        child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        // The pools only change after a game update; the live listener picks that up.
+        child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: _pools.snapshots(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
@@ -32,8 +33,7 @@ class LootScreen extends StatelessWidget {
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator(strokeWidth: 2));
             }
-            final categories =
-                buildCategoryLoot([for (final doc in snapshot.data!.docs) LootPool.fromMap(doc.data())]);
+            final categories = buildCategoryLoot(LootPool.allIn(snapshot.data!.data()));
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: [

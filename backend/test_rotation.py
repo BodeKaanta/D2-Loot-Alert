@@ -1,11 +1,14 @@
-"""Unit tests for the parts that are easy to get subtly wrong: reset math and alert deduplication.
+"""Unit tests for the parts that are easy to get subtly wrong: reset math, alert deduplication
+and the order of a run.
 
 Run from the repo root:  python -m unittest discover backend
 Uses only the standard library and a hand-made snapshot, so no network or Firebase.
 """
 
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest import mock
 
 import alerts
 import rotation
@@ -41,6 +44,12 @@ class ResetIds(unittest.TestCase):
         self.assertEqual(rotation.week_id(utc(2026, 10, 17, 23, 0)), "2026-10-13")  # Saturday
         self.assertEqual(rotation.week_id(utc(2026, 10, 20, 16, 59)), "2026-10-13")  # Tuesday, just before reset
         self.assertEqual(rotation.week_id(utc(2026, 10, 20, 17, 0)), "2026-10-20")  # Tuesday reset
+
+    def test_next_resets(self):
+        self.assertEqual(rotation.next_reset(utc(2026, 10, 17, 16, 59)), utc(2026, 10, 17, 17))
+        self.assertEqual(rotation.next_reset(utc(2026, 10, 17, 17, 7)), utc(2026, 10, 18, 17))
+        self.assertEqual(rotation.next_weekly_reset(utc(2026, 10, 17, 23, 0)), utc(2026, 10, 20, 17))  # Saturday
+        self.assertEqual(rotation.next_weekly_reset(utc(2026, 10, 20, 17, 7)), utc(2026, 10, 27, 17))  # Tuesday
 
 
 class Alerts(unittest.TestCase):
@@ -121,6 +130,13 @@ class Alerts(unittest.TestCase):
         self.assertEqual(alerts.ios_options({"image": None, "banner": None}),
                          {"thumbnail": None, "category": None})
 
+    def test_fcm_holds_an_alert_only_until_it_expires(self):
+        sent_at, expires = utc(2026, 10, 17, 17, 7), utc(2026, 10, 18, 17)
+        options = alerts.expiry_options({"expires": expires}, sent_at)
+        self.assertEqual(options["ttl"], timedelta(hours=23, minutes=53))
+        self.assertEqual(options["apns_headers"], {"apns-expiration": "1792342800"})  # 2026-10-18 17:00 UTC
+        self.assertEqual(alerts.expiry_options({}, sent_at), {"ttl": None, "apns_headers": None})
+
 
 def previews(*item_hashes):
     """A live activity whose preview rewards are these items."""
@@ -185,6 +201,12 @@ class Xur(unittest.TestCase):
                 raise AssertionError("shouldn't ask Bungie while he's away")
         tuesday_after_reset = utc(2026, 10, 20, 18, 7)
         self.assertEqual(rotation.xur_stock(Stale({}), tuesday_after_reset), [])
+
+    def test_trouble_reading_his_stock_leaves_him_out_instead_of_stopping_the_run(self):
+        class Down(FakeItems):
+            def request(self, path):
+                raise TimeoutError("no answer from Bungie")  # not a BungieError
+        self.assertEqual(rotation.xur_stock(Down({}), SATURDAY), [])
 
     def test_catalog_finds_collectibles_in_every_node_below_armor(self):
         nodes = {str(rotation.EXOTIC_ARMOR_NODE): {"children": {"presentationNodes": [{"presentationNodeHash": 10}]}},
@@ -295,6 +317,117 @@ class NewAlerts(unittest.TestCase):
         state = {"sentResetId": "2026-10-16", "sentWeaponTopics": ["weapon_spare-rations", "weapon_perfect-pitch"],
                  "sentWeekId": "2026-10-06", "sentRaidTopics": ["raid_last-wish"]}
         self.assertEqual(self.topics(state), {"weapon_spare-rations", "weapon_perfect-pitch", "raid_last-wish"})
+
+    def test_alerts_expire_when_what_they_announce_ends(self):
+        to_send, _, _, _ = rotation.new_alerts(SNAPSHOT, {}, self.now)  # Saturday 2026-10-17
+        expires = {a["topic"]: a["expires"] for a in to_send}
+        self.assertEqual(expires["weapon_spare-rations"], utc(2026, 10, 18, 17))  # the next daily reset
+        self.assertEqual(expires["raid_last-wish"], utc(2026, 10, 20, 17))  # the next weekly reset
+
+
+class FakeDoc:
+    def __init__(self, docs, path):
+        self.docs, self.path = docs, path
+
+    def set(self, data, merge=False):
+        self.docs[self.path] = {**self.docs.get(self.path, {}), **data} if merge else dict(data)
+
+    def get(self):
+        return SimpleNamespace(to_dict=lambda: self.docs.get(self.path))  # None if it doesn't exist
+
+
+class FakeDb:
+    """Stands in for Firestore: documents by path, merged on set(merge=True) like the real thing."""
+    def __init__(self):
+        self.docs = {}
+
+    def document(self, path):
+        return FakeDoc(self.docs, path)
+
+
+class LootPools(unittest.TestCase):
+    def test_every_pool_goes_in_one_document(self):
+        db = FakeDb()
+        rotation.save_loot_pools(db, {"solo-ops-quickplay": {"id": "solo-ops-quickplay"},
+                                      "gambit-ops-gambit": {"id": "gambit-ops-gambit"}})
+        self.assertEqual(db.docs["catalog/lootPools"],
+                         {"pools": [{"id": "gambit-ops-gambit"}, {"id": "solo-ops-quickplay"}]})  # sorted by id
+
+    def test_an_empty_build_keeps_the_old_pools(self):
+        db = FakeDb()
+        db.docs["catalog/lootPools"] = {"pools": [{"id": "gambit-ops-gambit"}]}
+        rotation.save_loot_pools(db, {})
+        self.assertEqual(db.docs["catalog/lootPools"], {"pools": [{"id": "gambit-ops-gambit"}]})
+
+
+class Run(unittest.TestCase):
+    """run() with Bungie, Firestore and FCM faked: what it saves and sends, and in which order."""
+
+    def setUp(self):
+        self.db = FakeDb()
+        self.api = SimpleNamespace(failed_lookups=0, character_activities=lambda name: {},
+                                   manifest_version=lambda: "manifest-2")
+        self.rebuild_error = None  # what the loot pool rebuild raises, if anything
+        self.lookups_failing = 0  # how many lookups fail during each rebuild
+        self.sent = []
+        self.saved_pools = []
+        fakes = [
+            (rotation, "Bungie", lambda api_key: self.api),
+            (rotation, "GameData", SimpleNamespace(download=lambda api: None)),
+            (rotation, "build_snapshot", lambda api, data, profile, now: {**SNAPSHOT, "xur": []}),
+            (rotation, "build_loot_pools", lambda api, data, profile: self.build_pools()),
+            (rotation, "build_exotic_armor_catalog", lambda api: {"armor": []}),
+            (rotation, "save_loot_pools", lambda db, pools: self.saved_pools.append(pools)),
+            (rotation, "save_exotic_armor_catalog", lambda db, catalog: None),
+            (alerts, "send", self.send),
+        ]
+        for module, name, fake in fakes:
+            patcher = mock.patch.object(module, name, fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def send(self, to_send):
+        self.sent += [a["topic"] for a in to_send]
+        return {a["topic"] for a in to_send}  # FCM accepts them all
+
+    def build_pools(self):
+        if self.rebuild_error:
+            raise self.rebuild_error
+        self.api.failed_lookups += self.lookups_failing
+        return {"gambit-ops-gambit": {"weapons": []}}
+
+    def run_once(self):
+        rotation.run("api key", "Guardian#1234", self.db)
+
+    def test_alerts_go_out_even_when_the_loot_pool_rebuild_fails(self):
+        self.rebuild_error = TimeoutError("Bungie stopped answering")  # e.g. right after a game update
+        with self.assertRaises(TimeoutError):
+            self.run_once()
+
+        self.assertEqual(set(self.sent), {"weapon_spare-rations", "weapon_perfect-pitch", "raid_last-wish"})
+        state = self.db.docs["meta/state"]
+        self.assertEqual(state["sentWeaponTopics"], ["weapon_perfect-pitch", "weapon_spare-rations"])
+        self.assertNotIn("manifestVersion", state)  # so the next run tries the rebuild again
+        self.assertNotIn("lastRunAt", state)  # and the run doesn't look finished
+
+    def test_a_rebuild_with_failed_lookups_is_tried_again_then_saved(self):
+        self.lookups_failing = 2
+        for tries in (1, 2):
+            self.run_once()
+            self.assertEqual(self.saved_pools, [])  # the old pools stay
+            self.assertEqual(self.db.docs["meta/state"]["rebuildTries"], tries)
+            self.assertNotIn("manifestVersion", self.db.docs["meta/state"])
+
+        self.run_once()  # the third try saves it anyway
+        self.assertEqual(len(self.saved_pools), 1)
+        state = self.db.docs["meta/state"]
+        self.assertEqual((state["manifestVersion"], state["rebuildTries"]), ("manifest-2", 0))
+
+    def test_a_clean_rebuild_is_saved_once(self):
+        self.run_once()
+        self.run_once()  # a backup run on the same game data
+        self.assertEqual(len(self.saved_pools), 1)
+        self.assertIn("lastRunAt", self.db.docs["meta/state"])
 
 
 if __name__ == "__main__":

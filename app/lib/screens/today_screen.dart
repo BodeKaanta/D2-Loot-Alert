@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import '../reset.dart';
 import '../theme.dart';
 import '../watch_store.dart';
 import '../widgets/activity_card.dart';
@@ -72,6 +75,9 @@ class _RotationList extends StatelessWidget {
         const SizedBox(height: 20),
         const Divider(color: AppColors.exotic, thickness: 1.5, height: 1.5),
         const SizedBox(height: 24),
+        // From reset until the backend's run a few minutes later, this is still the
+        // old rotation. Say so, so nobody heads off to farm yesterday's focus.
+        _OutOfDateNote(resetId: rotation.resetId),
         // Always one child, even when empty: if it changes while you're scrolled
         // further down, the list only lays out what's on screen, so nothing jumps.
         _ReadyToFarm(rotation: rotation),
@@ -145,6 +151,64 @@ class _ReadyToFarm extends StatelessWidget {
         for (final armor in ready.armor) ArmorRow(armor: armor, subtitle: '${armor.description} · Xûr'),
         const SizedBox(height: 28),
       ],
+    );
+  }
+}
+
+/// Shown while the rotation is from before the latest reset; otherwise an empty
+/// box, so it's always one list child.
+///
+/// It checks the clock every minute, so it also appears when reset happens while
+/// the app is open. The new rotation arrives through the live listener above,
+/// which rebuilds this with the new resetId and hides it again.
+class _OutOfDateNote extends StatefulWidget {
+  const _OutOfDateNote({required this.resetId});
+
+  final String resetId; // the rotation's
+
+  @override
+  State<_OutOfDateNote> createState() => _OutOfDateNoteState();
+}
+
+class _OutOfDateNoteState extends State<_OutOfDateNote> {
+  late final Timer _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isOutOfDate(widget.resetId, DateTime.now())) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: AppColors.surface, border: Border.all(color: AppColors.border)),
+        child: const Padding(
+          padding: EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Icon(Icons.schedule, size: 20, color: AppColors.textSecondary),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  "Not updated for today's reset yet. The new rotation shows up here on its own, "
+                  'usually a few minutes after reset.',
+                  style: AppText.body,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

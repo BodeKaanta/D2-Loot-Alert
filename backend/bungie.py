@@ -21,6 +21,9 @@ class Bungie:
         self.api_key = api_key
         self._definitions = {}  # cache for this run: (entity type, hash) -> definition
         self._manifest = None  # manifest index, fetched once per run
+        # Definition lookups Bungie answered with an error this run. rotation.py
+        # checks it so a loot pool rebuild with missing items isn't saved.
+        self.failed_lookups = 0
 
     def request(self, path, body=None):
         # Passing a body makes urllib send a POST instead of a GET.
@@ -45,12 +48,13 @@ class Bungie:
         return payload["Response"]
 
     def definition(self, entity_type, hash_id):
-        """One manifest definition (name, icon, type...), or {} if Bungie doesn't know the hash."""
+        """One manifest definition (name, icon, type...), or {} if the lookup failed."""
         key = (entity_type, hash_id)
         if key not in self._definitions:
             try:
                 self._definitions[key] = self.request(f"/Destiny2/Manifest/{entity_type}/{hash_id}/")
             except BungieError:
+                self.failed_lookups += 1
                 return {}  # don't cache failures; they may be temporary
         return self._definitions[key]
 

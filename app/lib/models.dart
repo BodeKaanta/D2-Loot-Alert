@@ -38,7 +38,7 @@ class ActivityGroup {
     this.image,
   });
 
-  final String id; // same id as its lootPools/{id} document
+  final String id; // same id as its pool in catalog/lootPools
   final String name;
   final String category; // the in-game Portal category, e.g. "Solo Ops"
   final List<Weapon> weapons;
@@ -193,7 +193,7 @@ const portalCategories = [
   'Solo Ops', 'Fireteam Ops', 'Arena Ops', 'Pinnacle Ops', 'Crucible Ops', 'Gambit Ops',
 ];
 
-/// A lootPools/{id} document: one activity's possible weapons.
+/// One activity's possible weapons: an entry in the catalog/lootPools document.
 class LootPool {
   const LootPool({required this.name, required this.category, required this.weapons, this.image});
 
@@ -208,6 +208,11 @@ class LootPool {
         image: map['image'] as String?,
         weapons: _maps(map['weapons']).map(Weapon.fromMap).toList(),
       );
+
+  /// Every pool in the catalog/lootPools document. They're all in one document,
+  /// so LOOT costs one read instead of one per pool. Null (not written yet) gives none.
+  static List<LootPool> allIn(Map<String, dynamic>? catalog) =>
+      _maps(catalog?['pools']).map(LootPool.fromMap).toList();
 }
 
 /// A weapon in a category's loot. [onlyIn] names the activities that drop it
@@ -228,7 +233,7 @@ class CategoryLoot {
   final String? image; // a banner from the category's main activities
 }
 
-/// Combines the lootPools documents into one weapon list per Portal category.
+/// Combines the loot pools into one weapon list per Portal category.
 ///
 /// Most activities in a category share one "main" pool (e.g. 34 Fireteam Ops
 /// activities, same 10 weapons); a few have their own (Trials, Sparrow Racing,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -39,6 +41,10 @@ Future<void> main() async {
     ..showSnackBar(SnackBar(content: Text(message))));
 
   runApp(LootAlertApp(watches: watches, messenger: messenger));
+
+  // A phone restored from a backup gets the watch list back but not its alert
+  // subscriptions, so subscribe to everything watched again, in the background.
+  unawaited(watches.resubscribeAll());
 }
 
 class LootAlertApp extends StatelessWidget {

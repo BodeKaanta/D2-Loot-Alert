@@ -82,10 +82,11 @@ what game it's for:
 > any weapon, raid, dungeon or exotic armor to watch it. The first tap asks for notification
 > permission. Notifications are optional: everything can be browsed without them.
 >
-> Notifications are sent by our server once a day, shortly after the game's daily reset at
-> 17:00 UTC, only for watched items that are available that day. To see one during review,
-> watch a weapon shown under BONUS FOCUS on the TODAY tab before 17:00 UTC; it is sent at the
-> next reset if it is still the bonus focus. Tapping a notification opens the app.
+> Notifications are sent by our server shortly after the game's daily reset (17:00 UTC), and
+> only for watched items that are available that day or week, so one can't be triggered on
+> demand. The attached screen recording shows the whole flow: watching a weapon, the
+> notification arriving after reset, the expanded notification with the activity's picture,
+> and tapping it to open the app.
 >
 > Content: all game images and data come from Bungie's official public Bungie.net API
 > (https://github.com/Bungie-net/api), used under its terms for non-commercial apps. The app
@@ -93,6 +94,8 @@ what game it's for:
 > the app says it is not affiliated with Bungie.
 
 - **Sign-in required:** No.
+- **Attachment:** a screen recording of a real notification, made on the iPad (steps in CLAUDE.md > #10).
+  The bonus focus changes at every reset, so a reviewer can't count on getting one.
 - **Contact:** Bode's name, phone and personal email (only Apple sees these).
 
 ## Screenshots

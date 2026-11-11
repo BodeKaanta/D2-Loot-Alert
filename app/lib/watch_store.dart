@@ -118,6 +118,34 @@ class WatchStore extends ChangeNotifier {
         remove: () => _armor.remove(armor.id),
       );
 
+  /// Subscribes to every watched topic again, in the background. main.dart calls
+  /// it once at startup.
+  ///
+  /// Topic subscriptions belong to this install of the app, but the watch list is
+  /// saved with the app's data, which phone backups bring back: iCloud on a new
+  /// iPhone, and Android's Auto Backup on a new phone or after a reinstall. The
+  /// restored app has no subscriptions, and maybe no notification permission yet,
+  /// so its bells would say "watching" while no alerts come. Subscribing again is
+  /// harmless when the subscription is already there.
+  Future<void> resubscribeAll() async {
+    if (_weapons.isEmpty && _raids.isEmpty && _armor.isEmpty) return; // nothing to restore, so no prompt
+    // On a restored phone this shows the permission prompt. Otherwise it returns
+    // the answer the user already gave, without asking again.
+    _permissionGranted = await _requestPermission();
+    // Read the list after that wait, so a bell tapped in the meantime isn't undone.
+    final topics = [
+      for (final id in _weapons.keys) push.weaponTopic(id),
+      for (final id in _raids.keys) push.raidTopic(id),
+      for (final id in _armor.keys) push.xurTopic(id),
+    ];
+    for (final topic in topics) {
+      // Queued like a tap's, so a tap right after launch still runs after it. A
+      // failure needs no message (the user didn't do anything): the next launch
+      // tries again.
+      _queueTopicChange(topic, () => _subscribe(topic));
+    }
+  }
+
   Future<WatchResult> _toggle({
     required String topic,
     required String label,
