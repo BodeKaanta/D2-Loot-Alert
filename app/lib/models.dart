@@ -18,8 +18,7 @@ class Weapon {
   final String? icon; // full https URL on bungie.net
 
   factory Weapon.fromMap(Map<String, dynamic> map) => Weapon(
-        // Data written before #26 has no id; the hash still keeps weapons apart.
-        id: map['id'] as String? ?? '${map['itemHash'] ?? ''}',
+        id: map['id'] as String? ?? '',
         itemHash: (map['itemHash'] as num?)?.toInt() ?? 0,
         name: map['name'] as String? ?? 'Unknown weapon',
         type: map['type'] as String? ?? '',

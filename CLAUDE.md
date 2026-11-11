@@ -264,7 +264,7 @@ Other notes:
 shortly after daily reset (17:00 UTC)
   scheduled Cloud Function (Python) ── Bungie API (Bode's profile)
      ├─ writes today's bonus drops + featured raids to Firestore
-     └─ sends FCM pushes to topics: weapon_<itemHash>, raid_<activityHash>
+     └─ sends FCM pushes to topics: weapon_<id>, raid_<id>, xur_<id>
 
 Flutter app (Android + iOS)
   ├─ reads today's data from Firestore
@@ -527,7 +527,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
   - **Why:** `Image.network` downloads once. After a failure it shows its error widget and never tries again, because rebuilding it with the same URL changes nothing. Seen on LOOT on 2026-10-27 (three black category cards) and on the iPad on 2026-11-09, when *every* Bungie image was blank while the text showed from Firestore's on-device cache. A restart fixed both.
   - **How:** it wraps an `Image` keyed by an attempt counter. A retry evicts the failed image from Flutter's image cache, then bumps the key, so a fresh `Image` downloads again. Retries come 2, 4, 8, 16 and 32 s after a failure, then it stops; returning to the app (lifecycle `resumed`) retries any failed image, even after it gave up. `errorBuilder` runs during a build, so it only schedules the retry; `setState` happens in the timer.
   - Used by `BannerImage` (activity, raid, LOOT and XÛR banners) and `ItemTile` (weapon and armor icons). The notification extensions download their own images.
-- **Tests:** `flutter test` (30 tests: models, category loot, READY TO FARM, reset math and the out-of-date check, watch store and the startup re-subscribe, image retry) and `flutter analyze`, both clean as of the bug sweep. `flutter_test` answers every HTTP request with 400, which the image retry tests rely on.
+- **Tests:** `flutter test` (29 tests: models, category loot, READY TO FARM, reset math and the out-of-date check, watch store and the startup re-subscribe, image retry) and `flutter analyze`, both clean as of the bug sweep. `flutter_test` answers every HTTP request with 400, which the image retry tests rely on.
 
 ### Design system (agreed with Bode in #8)
 
@@ -684,6 +684,7 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #51 | Pre-release bug sweep (a PR, no issue): alerts before the pool rebuild, alert expiry, startup re-subscribe, out-of-date note, loot pools in one document | M | Done |
 | later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
+| later | Cleanup from the 2026-11-11 code review (see the Decision log) | S | Not created |
 
 All Phase 0 questions are answered; see [Phase 0 findings](#phase-0-findings).
 
@@ -711,12 +712,14 @@ As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its r
   - **Rollout, in this order:**
     1. **Done 2026-11-11:** deployed with `firebase deploy --only functions,firestore:rules`. A public GET of a collection that isn't listed now gets 403 `PERMISSION_DENIED`, and the listed ones still read.
     2. **Done 2026-11-11:** Bode's Force run (06:36 UTC) wrote `catalog/lootPools`: 76 pools and 755 weapon entries, the same as the old collection. `meta/state` shows `poolsSchema` 8 and `rebuildTries` 0.
-    3. **Done 2026-11-11:** the App Store upload, built from `main` (`6b4137f`): `app/build/ios/ipa/d2lootalert.ipa`.
+    3. **Done 2026-11-11:** the App Store upload, built from `main` (`6b4137f`). It's superseded by a rebuild after the pre-#26 code removal (#10 below).
        - Checked: iPhone-only, portrait only, the encryption key, `aps-environment = production`, no `get-task-allow`, export method `app-store-connect`.
-       - It was built after the iPad build below, so `build/ios/` holds the App Store archive. **Waiting on Bode to upload it** (#10 below).
+       - It was built after the iPad build below, so `build/ios/` held the App Store archive.
     4. **Done 2026-11-11:** the iPad has a native iPad ad hoc build of the same code (made with the `2e5564b` settings, then restored; see #10 below), and Bode installed the new build on the Pixel.
     5. **Done 2026-11-11:** Bode deleted the old `lootPools` collection in the Firebase console, and `firestore.rules` no longer lists it. If that rules change isn't deployed yet, run `firebase deploy --only firestore:rules`.
 - **In progress: #10**, the App Store release, in several PRs, so issue #10 stays open until the app is submitted. The release settings (iPhone-only, portrait, encryption, launch screen) were PR #49, and the listing, screenshots script and donation decision PR #50 (both merged). See Next tasks below for the steps.
+  - **Now:** the last code change before the upload removes the code for data from before #26 (branch `task_10_remove_pre26_code`, from the 2026-11-11 code review).
+  - **After it's merged:** Claude rebuilds the App Store upload from `main` (the earlier build predates the change) and deploys PR #53's rules. Then Bode uploads.
 - **#44 (privacy policy and support page) is done** (PR #48). GitHub Pages serves `main`'s `/docs` folder (turned on by Bode, 2026-11-10). Both pages are live, and About's PRIVACY POLICY and PROJECT PAGE AND SOURCE CODE buttons open them (checked on the iPad by Bode). These URLs go into App Store Connect:
   - Support: `https://bodekaanta.github.io/D2-Loot-Alert/`
   - Privacy policy: `https://bodekaanta.github.io/D2-Loot-Alert/privacy/`
@@ -779,7 +782,7 @@ As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its r
        - If the alert doesn't show up in the recording, turn on Settings → Notifications → Screen Sharing → Allow Notifications.
        - Removing one topic resends only that weapon's alert (to everyone watching it, which before release is only Bode). Deleting all of `meta/state` would also resend every other alert and rebuild the pools.
      - **Still to do:** Bode's review of the listing and screenshots, attaching the screen recording, the EU trader status (not a trader), upload, internal TestFlight for the roommate, submit.
-       - **The upload is ready:** `app/build/ios/ipa/d2lootalert.ipa`, built from `main` on 2026-11-11. Drag it into Apple's Transporter app, or distribute `build/ios/archive/Runner.xcarchive` from Xcode's Organizer.
+       - **The upload:** after the pre-#26 code removal is merged, Claude rebuilds it from `main` and checks it (Upload a fresh build, above). Then Bode drags `app/build/ios/ipa/d2lootalert.ipa` into Apple's Transporter app, or distributes `build/ios/archive/Runner.xcarchive` from Xcode's Organizer.
        - If another iPad build is made before uploading, build the App Store one again first (Upload a fresh build, above).
      - **What Bode does in App Store Connect** (Claude gives the clicks): create the app record (name, bundle ID `com.id0.d2lootalert`, SKU), paste the listing, screenshots, privacy and support URLs, category, Free, countries, the App Privacy and age-rating questionnaires, the EU trader declaration (not a trader), upload the build from Xcode's Organizer, add the roommate as an internal TestFlight tester, submit. An individual account shows Bode's legal name as the seller. No banking or tax setup for a free app.
   2. **#45** signed Android APK.
@@ -878,6 +881,16 @@ As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its r
   - **TODAY says when it still shows the previous reset's rotation** (Bode).
   - **The Firestore rules list the public collections** instead of allowing everything.
   - **All loot pools in one document,** `catalog/lootPools` (Bode chose this over building LOOT only when opened): a launch reads about 3 documents instead of 78. Decided before v1, since installed copies keep reading the layout they shipped with.
+- **2026-11-11:** **Code review for technical debt** (Bode asked). Every function is used, and the code is small for what it does.
+  - **Fixed before v1:** the code for data from before #26 is removed. `Weapon.fromMap` no longer falls back to the item hash for a weapon without an `id`, and `WatchStore` no longer skips saved weapons without one. Only Bode's devices ever had that data (in October, cleared then), so no v1 user can.
+  - **Left for the later cleanup task (S):**
+    - Alert data the app never reads: `activityIds`, and the app's copy of `itemHash`.
+    - Repeats in `rotation.py`: three loops over every character's activities, three copies of the reset-day math, and the raid entry built twice.
+    - Stale text: a comment naming `_classImageAlignment` (now `_classImageFraming`), and the gradle template's application ID TODO.
+    - RAIDS & DUNGEONS spins forever if the rotation document is missing.
+    - `update_loot_pools()` takes six parameters.
+    - Dates, names and issue numbers in code comments (they belong in commits and here).
+    - Maybe deleting `phase0/` (its own Bungie client; git keeps it).
   - **App Review gets a screen recording** of a real alert, since a reviewer can't trigger one.
 - **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
   - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.
