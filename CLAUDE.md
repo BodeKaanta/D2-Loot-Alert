@@ -681,7 +681,7 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #34 | Today: READY TO FARM section with what you watch that's available now | S | Done |
 | #36 | Bug: Xûr's stock keeps showing (and re-alerting) after he leaves on Tuesday | S | Done |
 | #38 | Update the README now that the Android app works | S | Done |
-| — | Pre-release bug sweep: alerts before the pool rebuild, alert expiry, startup re-subscribe, out-of-date note (branch `bug_check_1`) | M | In progress |
+| #51 | Pre-release bug sweep (a PR, no issue): alerts before the pool rebuild, alert expiry, startup re-subscribe, out-of-date note, loot pools in one document | M | Done |
 | later | Vendor weapon alerts (Banshee etc.): needs OAuth as Bode, with a stored refresh token | — | Not created |
 | later | Extras: forecasting, armor bonus focus | — | Not created |
 
@@ -695,11 +695,11 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-11-10, everything through #44, plus #10's PRs #49 and #50, is merged into `main`, and `main` matches what's deployed.
+As of 2026-11-11, everything through PR #51 (the pre-release bug sweep) is merged into `main`, and `main` matches what's deployed. The backend and the Firestore rules went out on 2026-11-11.
 
 **Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 image retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
 
-- **In progress: the pre-release bug sweep** on branch `bug_check_1` (2026-11-10, see the Decision log). Every fix, all loot pools in one document included, is reviewed by Bode, committed and pushed, and the PR is open. **Waiting on Bode to merge it,** then the rollout steps below.
+- **The pre-release bug sweep is done:** PR #51, merged and deployed on 2026-11-11 (see the Decision log). Two rollout steps are left (4 and 5 below).
   - **The fixes:**
     - **Backend:** alerts before the loot pool rebuild, rebuild retries, Xûr can't stop a run, and alert expiry (Backend > Order of a run, Push notifications > Alerts expire).
     - **App:** `resubscribeAll()` at startup, TODAY's out-of-date note, and the Android image download limit.
@@ -708,12 +708,14 @@ As of 2026-11-10, everything through #44, plus #10's PRs #49 and #50, is merged 
     - Every app launch used to read about 78 documents, 76 of them `lootPools`, because `IndexedStack` builds LOOT at launch and LOOT listened to the whole collection. Opening the app again after 30+ minutes read them all again.
     - Now the backend writes `catalog/lootPools` (198 KiB), and a launch reads about 3. The free 50k reads a day covers about 16,000 launches instead of 640.
     - Decided before v1, because installed copies keep reading whatever layout they shipped with. (The other option was building LOOT only when its tab is first opened.)
-  - **After merging, in this order:**
-    1. Deploy: `firebase deploy --only functions,firestore:rules`.
-    2. Force run the scheduler job, or wait for 17:07 UTC. `POOLS_SCHEMA` 8 makes it write `catalog/lootPools`; check it with a public GET of `.../documents/catalog/lootPools`.
-    3. Build the App Store upload from `main` (#10 below). Before step 2, its LOOT tab would have no categories.
-    4. Install the new build on the iPad and the Pixel. Until then their old builds keep reading the old `lootPools` collection, which no longer updates.
-    5. Delete the old `lootPools` collection (Firebase console → Firestore → `lootPools` → ⋮ → Delete collection), and remove it from `firestore.rules`.
+  - **Rollout, in this order:**
+    1. **Done 2026-11-11:** deployed with `firebase deploy --only functions,firestore:rules`. A public GET of a collection that isn't listed now gets 403 `PERMISSION_DENIED`, and the listed ones still read.
+    2. **Done 2026-11-11:** Bode's Force run (06:36 UTC) wrote `catalog/lootPools`: 76 pools and 755 weapon entries, the same as the old collection. `meta/state` shows `poolsSchema` 8 and `rebuildTries` 0.
+    3. **Done 2026-11-11:** the App Store upload, built from `main` (`6b4137f`): `app/build/ios/ipa/d2lootalert.ipa`.
+       - Checked: iPhone-only, portrait only, the encryption key, `aps-environment = production`, no `get-task-allow`, export method `app-store-connect`.
+       - It was built after the iPad build below, so `build/ios/` holds the App Store archive. **Waiting on Bode to upload it** (#10 below).
+    4. **iPad done 2026-11-11:** a native iPad ad hoc build of the same code is installed (made with the `2e5564b` settings, then restored; see #10 below). **Pixel still to do:** Bode installs the new build from his PC. Until then it keeps reading the old `lootPools` collection, which no longer updates.
+    5. **After the Pixel:** delete the old `lootPools` collection (Firebase console → Firestore → `lootPools` → ⋮ → Delete collection), and remove it from `firestore.rules`.
 - **In progress: #10**, the App Store release, in several PRs, so issue #10 stays open until the app is submitted. The release settings (iPhone-only, portrait, encryption, launch screen) were PR #49, and the listing, screenshots script and donation decision PR #50 (both merged). See Next tasks below for the steps.
 - **#44 (privacy policy and support page) is done** (PR #48). GitHub Pages serves `main`'s `/docs` folder (turned on by Bode, 2026-11-10). Both pages are live, and About's PRIVACY POLICY and PROJECT PAGE AND SOURCE CODE buttons open them (checked on the iPad by Bode). These URLs go into App Store Connect:
   - Support: `https://bodekaanta.github.io/D2-Loot-Alert/`
@@ -734,7 +736,7 @@ As of 2026-11-10, everything through #44, plus #10's PRs #49 and #50, is merged 
   - The run started at 06:44:15 UTC, and all 3 watched focus weapons were posted between 06:45:06 and 06:45:08, while the phone was still idle.
   - On 2026-10-18 the same situation gave one alert, 50 minutes late.
 
-- **Backend:** the Cloud Function `daily_rotation`, deployed from `main` (#31). It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts. It can be deployed from Bode's PC or Mac.
+- **Backend:** the Cloud Function `daily_rotation`, deployed from `main` (PR #51, 2026-11-11). It runs 17:07 UTC plus backups at 18:07 and 21:07, writes the rotation, loot pools and `raidsAndDungeons`, and sends alerts. It can be deployed from Bode's PC or Mac.
 - **iOS app:** works end to end on Bode's iPad (ad hoc build): Today, Loot and Raids & Dungeons, watch bells, and alerts with the icon collapsed and the banner expanded. Never tried on an iPhone yet; the roommate gets it through internal TestFlight as part of #10.
 - **Android app:** works end to end on Bode's Pixel.
   - Today, Loot and Raids & Dungeons tabs, watch bells with instant taps, and the watch list.
@@ -777,6 +779,8 @@ As of 2026-11-10, everything through #44, plus #10's PRs #49 and #50, is merged 
        - If the alert doesn't show up in the recording, turn on Settings → Notifications → Screen Sharing → Allow Notifications.
        - Removing one topic resends only that weapon's alert (to everyone watching it, which before release is only Bode). Deleting all of `meta/state` would also resend every other alert and rebuild the pools.
      - **Still to do:** Bode's review of the listing and screenshots, attaching the screen recording, the EU trader status (not a trader), upload, internal TestFlight for the roommate, submit.
+       - **The upload is ready:** `app/build/ios/ipa/d2lootalert.ipa`, built from `main` on 2026-11-11. Drag it into Apple's Transporter app, or distribute `build/ios/archive/Runner.xcarchive` from Xcode's Organizer.
+       - If another iPad build is made before uploading, build the App Store one again first (Upload a fresh build, above).
      - **What Bode does in App Store Connect** (Claude gives the clicks): create the app record (name, bundle ID `com.id0.d2lootalert`, SKU), paste the listing, screenshots, privacy and support URLs, category, Free, countries, the App Privacy and age-rating questionnaires, the EU trader declaration (not a trader), upload the build from Xcode's Organizer, add the roommate as an internal TestFlight tester, submit. An individual account shows Bode's legal name as the seller. No banking or tax setup for a free app.
   2. **#45** signed Android APK.
 - **Keep an eye on:**
