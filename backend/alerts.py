@@ -6,6 +6,8 @@ raid_<id>, xur_<id>), so the backend never stores who is watching what. rotation
 decides which alerts are new; this module only builds and sends them.
 """
 
+from datetime import datetime, timedelta, timezone
+
 
 def weapon_topic(weapon_id):
     return f"weapon_{weapon_id}"  # the name slug, shared by every version of the weapon (#26)
@@ -130,6 +132,21 @@ def ios_options(alert):
     }
 
 
+def expiry_options(alert, now):
+    """How long FCM may hold an alert for a phone that's off or offline.
+
+    Until the alert's `expires`, set in rotation.new_alerts(): e.g. the next reset
+    for a bonus focus. Otherwise FCM keeps alerts for 4 weeks, and a phone that was
+    off for days would get "is a bonus drop today" long after it stopped being true.
+    Android takes a time to live, APNs an expiry time in Unix seconds.
+    """
+    expires = alert.get("expires")
+    if expires is None:
+        return {"ttl": None, "apns_headers": None}
+    return {"ttl": max(expires - now, timedelta(0)),
+            "apns_headers": {"apns-expiration": str(int(expires.timestamp()))}}
+
+
 def fcm_data(alert):
     """The alert's FCM data: what the app needs to open the right tab, plus what
     it needs to draw the notification on Android (#30).
@@ -152,9 +169,11 @@ def send(alerts):
     # Imported here so `rotation.py --dry-run` works without firebase-admin installed.
     from firebase_admin import messaging
 
+    now = datetime.now(timezone.utc)
     messages = []
     for alert in alerts:
         ios = ios_options(alert)
+        expiry = expiry_options(alert, now)
         messages.append(messaging.Message(
             topic=alert["topic"],
             # No `notification` part: that makes it a data message on Android, so the
@@ -162,9 +181,11 @@ def send(alerts):
             # visible alert from the `apns` part below.
             data=fcm_data(alert),
             # High priority so FCM delivers right away, even to a phone in Doze (#28).
-            # Otherwise it holds alerts until the phone wakes.
-            android=messaging.AndroidConfig(priority="high"),
+            # Otherwise it holds alerts until the phone wakes. The time to live
+            # drops an alert that's out of date before the phone is back.
+            android=messaging.AndroidConfig(priority="high", ttl=expiry["ttl"]),
             apns=messaging.APNSConfig(
+                headers=expiry["apns_headers"],  # apns-expiration: the same, on iPhones
                 payload=messaging.APNSPayload(aps=messaging.Aps(
                     alert=messaging.ApsAlert(title=alert["title"], body=alert["body"]),
                     # iOS only runs the app's Notification Service Extension (#17),
