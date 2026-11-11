@@ -355,7 +355,7 @@ Flutter app (Android + iOS)
   | `catalog/exoticArmor` | `armor[]`: every exotic armor piece, for the app's Xûr screen, plus `xurImage` and `classImages` (the cards' banners) (#13). Rebuilt along with the loot pools; an empty build keeps the old list. |
   | `history/{resetId}` | a copy of each reset's last snapshot |
   | `catalog/lootPools` | `pools[]`: every activity group's weapons, from its definitions' `rewards`, sorted by `id` (bug sweep). One document, so LOOT costs one read instead of one per pool; 198 KiB of the 1 MiB limit on 2026-11-10 (the biggest pool, Defiant Battleground: EDZ, is 5.3 KiB). Rebuilt only when the manifest version or `POOLS_SCHEMA` (in `rotation.py`) changes, and replaced whole, so pools that no longer exist go with it. An empty build keeps the old one; one with failed lookups is retried first (see Order of a run). |
-  | `lootPools/{id}` | the old layout, one document per pool. No longer written since the bug sweep, but app builds from before it still read it. Delete it once the iPad and Pixel run the new app, and remove it from `firestore.rules`. |
+  | `lootPools/{id}` | **Gone:** the old layout, one document per pool, used before the bug sweep. Deleted on 2026-11-11 once the iPad and Pixel ran the new app, and no longer in `firestore.rules`. |
   | `meta/state` | `manifestVersion`, `poolsSchema`, `rebuildTries` (failed rebuild tries so far), `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`, `sentXurTopics`) |
 
   - An **activity group** has an `id` (e.g. `gambit-ops-gambit`), `name`, `category` (the in-game Portal category), `image` (a real banner when one exists), `activityHashes[]` and `weapons[]`.
@@ -372,7 +372,7 @@ Flutter app (Android + iOS)
   - A **featured** entry has `id`, `name`, `kind` (`raid` or `dungeon`), `image` and `activityHashes[]`.
   - Only rotator-featured, farmable raids and dungeons appear (see Phase 0 findings). The newest raid and dungeon don't.
 
-- **Security rules** (`firestore.rules`): anyone can read the public collections (`rotation`, `catalog`, `history`, `meta`, and the old `lootPools` until it's deleted), everything else is private, and nobody can write. The backend writes through the Admin SDK, which ignores rules.
+- **Security rules** (`firestore.rules`): anyone can read the public collections (`rotation`, `catalog`, `history`, `meta`), everything else is private, and nobody can write. The backend writes through the Admin SDK, which ignores rules.
   - **A list, not "everything"** (bug sweep): so a future collection holding something private, like the OAuth token the vendor-alert idea needs (which belongs in Secret Manager anyway), isn't public by accident. A new collection the app reads must be added to the list.
   - `firebase deploy --only firestore:rules --dry-run` checks that they compile without publishing them.
 
@@ -695,11 +695,11 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-11-11, everything through PR #51 (the pre-release bug sweep) is merged into `main`, and `main` matches what's deployed. The backend and the Firestore rules went out on 2026-11-11.
+As of 2026-11-11, everything through PR #52 (the pre-release bug sweep and its rollout notes) is merged into `main`, and `main` matches what's deployed. The backend and the Firestore rules went out on 2026-11-11.
 
 **Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 image retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
 
-- **The pre-release bug sweep is done:** PR #51, merged and deployed on 2026-11-11 (see the Decision log). Two rollout steps are left (4 and 5 below).
+- **The pre-release bug sweep is done:** PR #51, merged and deployed on 2026-11-11 (see the Decision log). Its rollout finished the same day (below).
   - **The fixes:**
     - **Backend:** alerts before the loot pool rebuild, rebuild retries, Xûr can't stop a run, and alert expiry (Backend > Order of a run, Push notifications > Alerts expire).
     - **App:** `resubscribeAll()` at startup, TODAY's out-of-date note, and the Android image download limit.
@@ -714,8 +714,8 @@ As of 2026-11-11, everything through PR #51 (the pre-release bug sweep) is merge
     3. **Done 2026-11-11:** the App Store upload, built from `main` (`6b4137f`): `app/build/ios/ipa/d2lootalert.ipa`.
        - Checked: iPhone-only, portrait only, the encryption key, `aps-environment = production`, no `get-task-allow`, export method `app-store-connect`.
        - It was built after the iPad build below, so `build/ios/` holds the App Store archive. **Waiting on Bode to upload it** (#10 below).
-    4. **iPad done 2026-11-11:** a native iPad ad hoc build of the same code is installed (made with the `2e5564b` settings, then restored; see #10 below). **Pixel still to do:** Bode installs the new build from his PC. Until then it keeps reading the old `lootPools` collection, which no longer updates.
-    5. **After the Pixel:** delete the old `lootPools` collection (Firebase console → Firestore → `lootPools` → ⋮ → Delete collection), and remove it from `firestore.rules`.
+    4. **Done 2026-11-11:** the iPad has a native iPad ad hoc build of the same code (made with the `2e5564b` settings, then restored; see #10 below), and Bode installed the new build on the Pixel.
+    5. **Done 2026-11-11:** Bode deleted the old `lootPools` collection in the Firebase console, and `firestore.rules` no longer lists it. If that rules change isn't deployed yet, run `firebase deploy --only firestore:rules`.
 - **In progress: #10**, the App Store release, in several PRs, so issue #10 stays open until the app is submitted. The release settings (iPhone-only, portrait, encryption, launch screen) were PR #49, and the listing, screenshots script and donation decision PR #50 (both merged). See Next tasks below for the steps.
 - **#44 (privacy policy and support page) is done** (PR #48). GitHub Pages serves `main`'s `/docs` folder (turned on by Bode, 2026-11-10). Both pages are live, and About's PRIVACY POLICY and PROJECT PAGE AND SOURCE CODE buttons open them (checked on the iPad by Bode). These URLs go into App Store Connect:
   - Support: `https://bodekaanta.github.io/D2-Loot-Alert/`
@@ -785,7 +785,6 @@ As of 2026-11-11, everything through PR #51 (the pre-release bug sweep) is merge
   2. **#45** signed Android APK.
 - **Keep an eye on:**
   - **After the next game update,** check the function's logs for "lookups failed rebuilding the loot pools". If it shows on every try, some item never answers, and the pools only save on the third run.
-  - **Delete the old `lootPools` collection** once the iPad and Pixel run the new app, then drop it from `firestore.rules` (bug sweep's step 5 above).
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
   - **The iPad's ad hoc build expires 2027-09-04.** Rebuild and reinstall before then (iOS > Running on the iPad), or move the iPad to TestFlight with #10.
   - "Still open (minor)" above.
