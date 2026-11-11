@@ -5,17 +5,15 @@ rules_version = '2';
 //
 // Only these collections are public: the game data the app shows (rotation,
 // catalog), and what's kept for checking the backend without logging in
-// (history, meta). lootPools is the old one-document-per-pool layout, which app
-// builds from before the bug sweep still read: remove it here once it's deleted.
-// Anything else is private, so a collection added later only becomes public by
-// being added to this list on purpose.
+// (history, meta). Anything else is private, so a collection added later only
+// becomes public by being added to this list on purpose.
 //
 // All writes come from the backend through the Admin SDK, which ignores these
 // rules, so no client is ever allowed to write.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{collection}/{document} {
-      allow read: if collection in ['rotation', 'lootPools', 'catalog', 'history', 'meta'];
+      allow read: if collection in ['rotation', 'catalog', 'history', 'meta'];
       allow write: if false;
     }
   }
