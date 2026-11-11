@@ -345,6 +345,21 @@ class FakeDb:
         return FakeDoc(self.docs, path)
 
 
+class LootPools(unittest.TestCase):
+    def test_every_pool_goes_in_one_document(self):
+        db = FakeDb()
+        rotation.save_loot_pools(db, {"solo-ops-quickplay": {"id": "solo-ops-quickplay"},
+                                      "gambit-ops-gambit": {"id": "gambit-ops-gambit"}})
+        self.assertEqual(db.docs["catalog/lootPools"],
+                         {"pools": [{"id": "gambit-ops-gambit"}, {"id": "solo-ops-quickplay"}]})  # sorted by id
+
+    def test_an_empty_build_keeps_the_old_pools(self):
+        db = FakeDb()
+        db.docs["catalog/lootPools"] = {"pools": [{"id": "gambit-ops-gambit"}]}
+        rotation.save_loot_pools(db, {})
+        self.assertEqual(db.docs["catalog/lootPools"], {"pools": [{"id": "gambit-ops-gambit"}]})
+
+
 class Run(unittest.TestCase):
     """run() with Bungie, Firestore and FCM faked: what it saves and sends, and in which order."""
 

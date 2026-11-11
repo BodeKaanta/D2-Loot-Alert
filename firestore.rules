@@ -4,9 +4,11 @@ rules_version = '2';
 // (or paste into Firebase console > Firestore Database > Rules, then Publish).
 //
 // Only these collections are public: the game data the app shows (rotation,
-// lootPools, catalog), and what's kept for checking the backend without logging
-// in (history, meta). Anything else is private, so a collection added later only
-// becomes public by being added to this list on purpose.
+// catalog), and what's kept for checking the backend without logging in
+// (history, meta). lootPools is the old one-document-per-pool layout, which app
+// builds from before the bug sweep still read: remove it here once it's deleted.
+// Anything else is private, so a collection added later only becomes public by
+// being added to this list on purpose.
 //
 // All writes come from the backend through the Admin SDK, which ignores these
 // rules, so no client is ever allowed to write.

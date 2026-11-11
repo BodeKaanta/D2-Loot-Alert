@@ -46,11 +46,12 @@ CLASS_BANNER_ARMOR = {"Titan": "Heart of Inmost Light", "Hunter": "The Sixth Coy
 # Anything else (e.g. an activity outside the Portal) comes after, alphabetically.
 CATEGORY_ORDER = ["Solo Ops", "Fireteam Ops", "Arena Ops", "Pinnacle Ops", "Crucible Ops", "Gambit Ops"]
 
-# Bump when the shape or IDs of lootPools documents (or the exotic armor catalog)
+# Bump when the shape or IDs of the loot pools (or the exotic armor catalog)
 # change, to force a rebuild even if Bungie's game data hasn't changed.
 # 2 = in-game Portal categories (#8), 3 = weapon ids (#26), 4 = exotic armor catalog (#13),
-# 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13).
-POOLS_SCHEMA = 7
+# 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13),
+# 8 = every pool in one document, catalog/lootPools (bug sweep).
+POOLS_SCHEMA = 8
 
 # A loot pool rebuild where some lookups failed is missing those items, so it isn't
 # saved and the next run tries again. The last try saves it anyway, so an item
@@ -433,14 +434,18 @@ def new_alerts(snapshot, state, now):
 
 
 def save_loot_pools(db, pools):
-    """Write every pool, and delete pools left over from older IDs (e.g. old category names)."""
-    batch = db.batch()
-    for pool_id, pool in pools.items():
-        batch.set(db.document(f"lootPools/{pool_id}"), pool)
-    for old in db.collection("lootPools").list_documents():
-        if old.id not in pools:
-            batch.delete(old)
-    batch.commit()
+    """Every pool in one document, catalog/lootPools, so the app's LOOT tab costs one
+    read instead of one per pool (76 on 2026-11-10).
+
+    About 200 KiB, well under Firestore's 1 MiB per document. The document is
+    replaced whole, so pools that no longer exist go with it. An empty build means
+    Bungie's data changed shape, so the old pools are kept rather than wiped, like
+    the exotic armor catalog.
+    """
+    if not pools:
+        print("Loot pools came back empty; keeping the old ones (check build_loot_pools)")
+        return
+    db.document("catalog/lootPools").set({"pools": sorted(pools.values(), key=lambda p: p["id"])})
 
 
 def save_exotic_armor_catalog(db, catalog):
@@ -488,8 +493,8 @@ def update_loot_pools(api, data, profile, db, state, state_ref):
     failed = api.failed_lookups - failed_before
     tries = state.get("rebuildTries", 0) + 1
     if failed and tries < REBUILD_TRIES:
-        # Saving now would drop the items whose lookups failed (and delete pools left
-        # empty) until the next game update. Keep the old data; the next run tries again.
+        # Saving now would drop the items whose lookups failed, and any pool left
+        # empty, until the next game update. Keep the old data; the next run tries again.
         print(f"{failed} lookups failed rebuilding the loot pools; keeping the old ones and "
               f"trying again next run (try {tries} of {REBUILD_TRIES})")
         state_ref.set({"rebuildTries": tries}, merge=True)

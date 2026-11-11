@@ -302,7 +302,7 @@ Flutter app (Android + iOS)
   | Cloud Functions (Cloud Run) | 3 short runs a day | 2M requests, 180k vCPU-seconds, 360k GiB-seconds a month |
   | Cloud Scheduler | 1 job (one cron with 3 times) | 3 jobs per billing account |
   | Secret Manager | 2 secrets | 6 active secret versions, 10k accesses a month |
-  | Firestore | a handful of writes per run; app reads | 50k reads, 20k writes a day |
+  | Firestore | a handful of writes per run; about 3 reads per app launch (bug sweep) | 50k reads, 20k writes a day |
   | Artifact Registry | build images from deploys | 0.5 GB storage, kept low by a cleanup policy |
   | FCM | pushes | free |
 
@@ -345,7 +345,7 @@ Flutter app (Android + iOS)
 - **Idempotent:** each run for the same reset overwrites the same documents. **Reset ID** is the date of the most recent 17:00 UTC reset, e.g. `2026-10-17`.
 - **Order of a run** (pre-release bug sweep, 2026-11-10): snapshot → `rotation/current` and `history` → alerts, recorded in `meta/state` → the loot pool rebuild, only after a game update → `lastRunAt`.
   - **Alerts never wait on the rebuild.** It's a few hundred Bungie lookups and only runs after a game update, when Bungie's servers are often struggling. Before the sweep it ran first, so one network timeout in it stopped the run before any alert went out, and every backup run repeated it.
-  - **A rebuild where any lookup failed isn't saved** (`failed_lookups`, counted in `bungie.py`). Saving it would drop those items, and delete pools left empty, until the next game update. The next run tries again (`rebuildTries` in `meta/state`), and the third try (`REBUILD_TRIES`) saves it anyway, so an item Bungie never answers for can't block every later update. Look for "lookups failed rebuilding the loot pools" in the logs.
+  - **A rebuild where any lookup failed isn't saved** (`failed_lookups`, counted in `bungie.py`). Saving it would drop those items, and any pool left empty, until the next game update. The next run tries again (`rebuildTries` in `meta/state`), and the third try (`REBUILD_TRIES`) saves it anyway, so an item Bungie never answers for can't block every later update. Look for "lookups failed rebuilding the loot pools" in the logs.
   - **Xûr can't stop a run:** `xur_stock()` catches every error (Bungie's, a timeout, an unexpected reply), leaves him out of that run and logs "Couldn't read Xûr's stock".
 - **Firestore layout** (finalized in #6):
 
@@ -354,13 +354,14 @@ Flutter app (Android + iOS)
   | `rotation/current` | `resetId`, `updatedAt`, `activities[]`, `featured[]`, `raidsAndDungeons[]` (every farmable-capable raid and dungeon, same entry shape and IDs as `featured`; Pantheon and the newest raid and dungeon are left out), `xur[]` (the exotic armor Xûr is selling, empty when he's not in the game, #13) |
   | `catalog/exoticArmor` | `armor[]`: every exotic armor piece, for the app's Xûr screen, plus `xurImage` and `classImages` (the cards' banners) (#13). Rebuilt along with the loot pools; an empty build keeps the old list. |
   | `history/{resetId}` | a copy of each reset's last snapshot |
-  | `lootPools/{id}` | one activity group's weapons, from its definitions' `rewards`. Rebuilt only when the manifest version or `POOLS_SCHEMA` (in `rotation.py`) changes; a rebuild also deletes pools whose IDs no longer exist. One with failed lookups is retried first (see Order of a run). |
+  | `catalog/lootPools` | `pools[]`: every activity group's weapons, from its definitions' `rewards`, sorted by `id` (bug sweep). One document, so LOOT costs one read instead of one per pool; 198 KiB of the 1 MiB limit on 2026-11-10 (the biggest pool, Defiant Battleground: EDZ, is 5.3 KiB). Rebuilt only when the manifest version or `POOLS_SCHEMA` (in `rotation.py`) changes, and replaced whole, so pools that no longer exist go with it. An empty build keeps the old one; one with failed lookups is retried first (see Order of a run). |
+  | `lootPools/{id}` | the old layout, one document per pool. No longer written since the bug sweep, but app builds from before it still read it. Delete it once the iPad and Pixel run the new app, and remove it from `firestore.rules`. |
   | `meta/state` | `manifestVersion`, `poolsSchema`, `rebuildTries` (failed rebuild tries so far), `lastResetId`, `lastRunAt`, plus alert tracking (`sentResetId`, `sentWeaponTopics`, `sentWeekId`, `sentRaidTopics`, `sentXurTopics`) |
 
   - An **activity group** has an `id` (e.g. `gambit-ops-gambit`), `name`, `category` (the in-game Portal category), `image` (a real banner when one exists), `activityHashes[]` and `weapons[]`.
     - The `id` is the slug of category + base name, so the Today screen's entries link to their loot pool by the same `id`.
     - `activities[]` is sorted in the game's Portal order (`CATEGORY_ORDER`: Solo, Fireteam, Arena, Pinnacle, Crucible, Gambit Ops), then anything else alphabetically, then by name. The app keeps that order.
-    - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool or catalog shape change. 2 = Portal categories (#8), 3 = weapon `id`s (#26), 4 = exotic armor catalog (#13), 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13).
+    - **Bump `POOLS_SCHEMA`** whenever group IDs or the pool or catalog shape change. 2 = Portal categories (#8), 3 = weapon `id`s (#26), 4 = exotic armor catalog (#13), 5 = catalog banners (#13), 6 and 7 = new Warlock card pictures (#13), 8 = every pool in one document, `catalog/lootPools` (bug sweep).
   - An **exotic armor** entry has `id` (name slug), `itemHash`, `name`, `class` (Titan, Hunter or Warlock), `slot` (e.g. "Chest Armor") and `icon`.
     - Xûr's stock also has `screenshot`, for the alert.
     - Accented letters become hyphens in slugs: Mataiodoxía → `mataiodox-a`. It's consistent everywhere, so leave it; changing `slug()` would change existing topics.
@@ -371,7 +372,7 @@ Flutter app (Android + iOS)
   - A **featured** entry has `id`, `name`, `kind` (`raid` or `dungeon`), `image` and `activityHashes[]`.
   - Only rotator-featured, farmable raids and dungeons appear (see Phase 0 findings). The newest raid and dungeon don't.
 
-- **Security rules** (`firestore.rules`): anyone can read the public collections (`rotation`, `lootPools`, `catalog`, `history`, `meta`), everything else is private, and nobody can write. The backend writes through the Admin SDK, which ignores rules.
+- **Security rules** (`firestore.rules`): anyone can read the public collections (`rotation`, `catalog`, `history`, `meta`, and the old `lootPools` until it's deleted), everything else is private, and nobody can write. The backend writes through the Admin SDK, which ignores rules.
   - **A list, not "everything"** (bug sweep): so a future collection holding something private, like the OAuth token the vendor-alert idea needs (which belongs in Secret Manager anyway), isn't public by accident. A new collection the app reads must be added to the list.
   - `firebase deploy --only firestore:rules --dry-run` checks that they compile without publishing them.
 
@@ -494,7 +495,7 @@ Lives in `app/` (Flutter 3.44, Dart 3.12). The package name is `d2lootalert`, an
         - The XÛR card on LOOT uses `Alignment(0, -0.6)` in `loot_screen.dart`, so his head isn't cut off.
       - Bode was offered the official class symbols (they're in the data, as Collections node icons) but kept the screenshots: the symbols are Bungie branding, which the art rules exclude.
     - The cards are the shared `LinkCard` widget, the same as the category cards.
-  - `buildCategoryLoot()` merges the `lootPools` docs per category, listing each weapon once by `id`, so it's watched from one row (#26). The main pool is the weapon list most activities share. Weapons outside it are labeled "<activity> only" (e.g. Trials of Osiris, Sparrow Racing League, Warden of Nothing), which also covers Iron Banner or Trials-specific focus later.
+  - `buildCategoryLoot()` merges the pools from `catalog/lootPools` (`LootPool.allIn()`) per category, listing each weapon once by `id`, so it's watched from one row (#26). The main pool is the weapon list most activities share. Weapons outside it are labeled "<activity> only" (e.g. Trials of Osiris, Sparrow Racing League, Warden of Nothing), which also covers Iron Banner or Trials-specific focus later.
   - **Only the Portal categories are shown** (`portalCategories`, kept in sync with `CATEGORY_ORDER` in `rotation.py`). That hides the one-off Campaign, Story and World quest weapons (Bode).
 - **Raids & Dungeons:** FEATURED THIS WEEK (grid with bells), then ALL RAIDS and ALL DUNGEONS as slim banner rows with bells. These come from `rotation/current.raidsAndDungeons`; featured ones are labeled in gold.
 - **Watching** (`WatchStore`, a `ChangeNotifier` read through `WatchScope.of(context)`):
@@ -698,17 +699,21 @@ As of 2026-11-10, everything through #44, plus #10's PRs #49 and #50, is merged 
 
 **Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 image retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
 
-- **In progress: the pre-release bug sweep** on branch `bug_check_1` (2026-11-10, see the Decision log). **Waiting on Bode's review.**
+- **In progress: the pre-release bug sweep** on branch `bug_check_1` (2026-11-10, see the Decision log). Every fix, all loot pools in one document included, is reviewed by Bode, committed and pushed, and the PR is open. **Waiting on Bode to merge it,** then the rollout steps below.
   - **The fixes:**
     - **Backend:** alerts before the loot pool rebuild, rebuild retries, Xûr can't stop a run, and alert expiry (Backend > Order of a run, Push notifications > Alerts expire).
     - **App:** `resubscribeAll()` at startup, TODAY's out-of-date note, and the Android image download limit.
     - **Other:** `firestore.rules` lists the public collections, and the App Review notes point to a screen recording.
-  - **After merging:** deploy the backend (`firebase deploy --only functions`) and the rules (`firebase deploy --only firestore:rules`), then check that the app still loads. The app changes ship with the App Store build (#10 below).
-  - **Waiting on Bode's decision: Firestore reads per launch.**
-    - Every app launch reads about 78 documents, 76 of them `lootPools`, because `IndexedStack` builds LOOT at launch and LOOT listens to the whole collection. Opening the app again after 30+ minutes reads them all again.
-    - The free 50k reads a day covers about 640 launches.
-    - **(a)** Build LOOT only when its tab is first opened. App only.
-    - **(b)** Save all pools as one document (about 229 KiB, under the 1 MiB limit). Backend and app. Best decided before v1, since released versions keep reading the old layout.
+  - **All loot pools in one document** (Bode chose this, option (b), on 2026-11-10).
+    - Every app launch used to read about 78 documents, 76 of them `lootPools`, because `IndexedStack` builds LOOT at launch and LOOT listened to the whole collection. Opening the app again after 30+ minutes read them all again.
+    - Now the backend writes `catalog/lootPools` (198 KiB), and a launch reads about 3. The free 50k reads a day covers about 16,000 launches instead of 640.
+    - Decided before v1, because installed copies keep reading whatever layout they shipped with. (The other option was building LOOT only when its tab is first opened.)
+  - **After merging, in this order:**
+    1. Deploy: `firebase deploy --only functions,firestore:rules`.
+    2. Force run the scheduler job, or wait for 17:07 UTC. `POOLS_SCHEMA` 8 makes it write `catalog/lootPools`; check it with a public GET of `.../documents/catalog/lootPools`.
+    3. Build the App Store upload from `main` (#10 below). Before step 2, its LOOT tab would have no categories.
+    4. Install the new build on the iPad and the Pixel. Until then their old builds keep reading the old `lootPools` collection, which no longer updates.
+    5. Delete the old `lootPools` collection (Firebase console → Firestore → `lootPools` → ⋮ → Delete collection), and remove it from `firestore.rules`.
 - **In progress: #10**, the App Store release, in several PRs, so issue #10 stays open until the app is submitted. The release settings (iPhone-only, portrait, encryption, launch screen) were PR #49, and the listing, screenshots script and donation decision PR #50 (both merged). See Next tasks below for the steps.
 - **#44 (privacy policy and support page) is done** (PR #48). GitHub Pages serves `main`'s `/docs` folder (turned on by Bode, 2026-11-10). Both pages are live, and About's PRIVACY POLICY and PROJECT PAGE AND SOURCE CODE buttons open them (checked on the iPad by Bode). These URLs go into App Store Connect:
   - Support: `https://bodekaanta.github.io/D2-Loot-Alert/`
@@ -760,13 +765,23 @@ As of 2026-11-10, everything through #44, plus #10's PRs #49 and #50, is merged 
        - On 2026-11-10 the archive in `build/ios/` was the iPad ad hoc build (iPhone and iPad, landscape, no encryption key). Uploading it would have shipped iPad support for good.
      - **Screen recording for App Review** (the Attachment in App Review Information): a reviewer can't trigger an alert, since the bonus focus changes at every reset.
        - Record on the iPad, not the Pixel: Apple is reviewing the iOS app, and Android in the video would show another platform.
-       - Steps: Control Center → Screen Recording. Open the app and watch a weapon that's today's focus. Force a resend: Bode deletes `meta/state`, then Force runs the scheduler job (see Push notifications > Testing delivery). Go to the home screen and wait for the alert, long-press it for the banner, then tap it to open TODAY. Trim the video in Photos.
-       - Only before release: deleting `meta/state` resends today's alerts to everyone watching, and rebuilds the pools.
-     - **Still to do:** Bode's review of the listing and screenshots, the screen recording, the EU trader status (not a trader), upload, internal TestFlight for the roommate, submit.
+       - **Done:** Bode recorded it on the iPad on 2026-11-10. AirDrop it to the Mac and attach it on the version's page in App Store Connect, under App Review Information. Attachments belong to one version, so a later version needs it attached again.
+       - **Bode records it; Claude can't.** Nothing on the Mac can record or tap a real iPad's screen, and the alert has to be a real push.
+       - Steps:
+         1. Start the iPad's screen recording (Control Center → Screen Recording).
+         2. Open the app and tap the bell on a weapon in today's BONUS FOCUS. Wait a minute so the subscription takes effect.
+         3. In the Firebase console: Firestore → `meta` → `state` → `sentWeaponTopics`, and delete that weapon's entry (e.g. `weapon_fair-judgment`), so the next run sends its alert again.
+         4. Google Cloud console → Cloud Scheduler → `firebase-schedule-daily_rotation-us-central1` → ⋮ → **Force run**.
+         5. On the iPad, go to the home screen and wait for the alert (usually under a minute). Long-press it for the banner, then tap it to open TODAY.
+         6. Stop the recording and trim it in Photos.
+       - If the alert doesn't show up in the recording, turn on Settings → Notifications → Screen Sharing → Allow Notifications.
+       - Removing one topic resends only that weapon's alert (to everyone watching it, which before release is only Bode). Deleting all of `meta/state` would also resend every other alert and rebuild the pools.
+     - **Still to do:** Bode's review of the listing and screenshots, attaching the screen recording, the EU trader status (not a trader), upload, internal TestFlight for the roommate, submit.
      - **What Bode does in App Store Connect** (Claude gives the clicks): create the app record (name, bundle ID `com.id0.d2lootalert`, SKU), paste the listing, screenshots, privacy and support URLs, category, Free, countries, the App Privacy and age-rating questionnaires, the EU trader declaration (not a trader), upload the build from Xcode's Organizer, add the roommate as an internal TestFlight tester, submit. An individual account shows Bode's legal name as the seller. No banking or tax setup for a free app.
   2. **#45** signed Android APK.
 - **Keep an eye on:**
   - **After the next game update,** check the function's logs for "lookups failed rebuilding the loot pools". If it shows on every try, some item never answers, and the pools only save on the third run.
+  - **Delete the old `lootPools` collection** once the iPad and Pixel run the new app, then drop it from `firestore.rules` (bug sweep's step 5 above).
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
   - **The iPad's ad hoc build expires 2027-09-04.** Rebuild and reinstall before then (iOS > Running on the iPad), or move the iPad to TestFlight with #10.
   - "Still open (minor)" above.
@@ -859,6 +874,7 @@ As of 2026-11-10, everything through #44, plus #10's PRs #49 and #50, is merged 
   - **The app re-subscribes to its watched topics at every launch,** because phone backups restore the list without the subscriptions.
   - **TODAY says when it still shows the previous reset's rotation** (Bode).
   - **The Firestore rules list the public collections** instead of allowing everything.
+  - **All loot pools in one document,** `catalog/lootPools` (Bode chose this over building LOOT only when opened): a launch reads about 3 documents instead of 78. Decided before v1, since installed copies keep reading the layout they shipped with.
   - **App Review gets a screen recording** of a real alert, since a reviewer can't trigger one.
 - **2026-10-19:** **Xûr alerts cover exotic armor only, picked from the full Collections list** (#13).
   - **The list:** all 141 pieces from Collections (Exotic > Armor), not just what Xûr has sold before, so anything can be watched from day one.

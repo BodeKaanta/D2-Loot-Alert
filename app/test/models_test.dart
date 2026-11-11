@@ -57,6 +57,25 @@ void main() {
   LootPool pool(String name, String category, List<Weapon> weapons) =>
       LootPool(name: name, category: category, weapons: weapons);
 
+  test('loot pools come from the one catalog/lootPools document', () {
+    final pools = LootPool.allIn({
+      'pools': [
+        {
+          'id': 'gambit-ops-gambit',
+          'name': 'Gambit',
+          'category': 'Gambit Ops',
+          'weapons': [
+            {'id': 'spare-rations', 'itemHash': 1, 'name': 'Spare Rations', 'type': 'Hand Cannon'},
+          ],
+        },
+        'not a pool', // skipped, not a crash
+      ],
+    });
+    expect(pools.single.category, 'Gambit Ops');
+    expect(pools.single.weapons.single.id, 'spare-rations');
+    expect(LootPool.allIn(null), isEmpty); // not written yet
+  });
+
   test('category loot: one list per Portal category, special-pool weapons say where', () {
     final crucibleMain = [w(1, 'Autumn Wind'), w(2, 'Better Devils')];
 
