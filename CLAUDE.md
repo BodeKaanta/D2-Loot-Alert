@@ -658,8 +658,8 @@ The Firebase client config files are **gitignored** (`app/lib/firebase_options.d
 | #17 | iOS setup: push key, notification image extension, iPad testing (Mac) | M | Done |
 | #42 | App icon on iOS and Android (with the Android notification icon), credit Owen Hartman on About | S | Done |
 | #43 | Bug: banner images retry after a failed download (icons too) | S | Done |
-| #44 | Privacy policy and support page on GitHub Pages, project link on About | S | In progress |
-| #10 | Release: iOS App Store (needs #42, #43, #44) | M | Backlog |
+| #44 | Privacy policy and support page on GitHub Pages, project link on About | S | Done |
+| #10 | Release: iOS App Store (needs #42, #43, #44) | M | In progress |
 | #45 | Release: signed Android APK | S | Backlog |
 | #13 | Xûr alerts: exotic armor he's selling (names only, no login) | M | Done |
 | #34 | Today: READY TO FARM section with what you watch that's available now | S | Done |
@@ -678,19 +678,17 @@ Watch these in the daily snapshots once #6 runs.
 
 ## Current status
 
-As of 2026-11-10, everything through #42 is merged into `main`, and `main` matches what's deployed.
+As of 2026-11-10, everything through #44 is merged into `main`, and `main` matches what's deployed.
 
 **Working towards the App Store release (#10).** Plan agreed with Bode on 2026-11-08: #42 icon → #43 image retry → #44 privacy policy and support page → #10 App Store submission. #45 (Android APK) is separate.
 
-- **In progress: #44** (branch `task_44`, named by Bode): the privacy policy and support page, and About's links.
-  - **Pages:** `docs/privacy.md` (privacy policy) and `docs/index.md` (support page), published with GitHub Pages from `main`'s `/docs` folder (Bode chose this repo over a separate one). `docs/_config.yml` sets the title and theme.
-    - URLs once live: `https://bodekaanta.github.io/D2-Loot-Alert/` (support) and `https://bodekaanta.github.io/D2-Loot-Alert/privacy/` (privacy policy). These go into App Store Connect in #10.
-  - **About:** PRIVACY POLICY and PROJECT PAGE AND SOURCE CODE buttons, next to OPEN-SOURCE LICENSES, opening the browser with `url_launcher` (added with Bode's OK). The privacy button only works once Pages is live.
-  - **Contact on both pages:** `d2lootalert@gmail.com`, a dedicated Gmail Bode made for the app (named "D2 Loot Alert"), plus GitHub Issues. Bode's personal email stays private; it's fine for the App Review contact in App Store Connect, which only Apple sees.
-  - **Still to do:** Bode reviews the page text; the build on the iPad has the buttons; then commit and PR. **After the merge, turn on GitHub Pages:** repo Settings → Pages → Build and deployment → Deploy from a branch → `main`, `/docs` → Save (Bode, or Claude with `gh api` if he says so). Then check both URLs and the About buttons.
+- **In progress: #10** (branch `task_10_app_store_release`): the App Store release. See Next tasks below for the steps.
+- **#44 (privacy policy and support page) is done** (PR #48). GitHub Pages serves `main`'s `/docs` folder (turned on by Bode, 2026-11-10). Both pages are live, and About's PRIVACY POLICY and PROJECT PAGE AND SOURCE CODE buttons open them (checked on the iPad by Bode). These URLs go into App Store Connect:
+  - Support: `https://bodekaanta.github.io/D2-Loot-Alert/`
+  - Privacy policy: `https://bodekaanta.github.io/D2-Loot-Alert/privacy/`
+  - **Contact on both pages:** `d2lootalert@gmail.com`, a dedicated Gmail Bode made for the app, plus GitHub Issues. Bode's personal email stays private; it's fine for the App Review contact in App Store Connect, which only Apple sees.
 - **#43 (image retry) is done** (PR #47). `RetryingNetworkImage` replaces `Image.network` in `BannerImage` and `ItemTile`. The Airplane Mode test on the iPad passed (Bode, 2026-11-10).
 - **#42 (app icon) is done** (PR #46). Checked on the iPad, and on the Pixel by Bode from his PC (2026-11-09: the notification icon showed correctly). Owen may want a link next to his credit; Bode will ask.
-- **Open questions for #10:** keep iPad support in the first release (then its layout needs a look and 13" iPad screenshots), or iPhone-only?
 - **#31 (expanded banner on iOS) is done.** The 2026-11-08 reset alerts arrived with `category: banner`, but the extension crashed on long-press (frameworks not linked, fixed the same day). With the fixed ad hoc build, long-pressing those alerts showed the activity banner with the title and body under it (Bode, 2026-11-08). Still true after the code-review fixes (timeout, stale downloads, background decoding).
 - **#17 (iOS setup) is done.** Bode's iPad runs an ad hoc build (see iOS > Running on the iPad), and real reset alerts arrive with the weapon icon (2026-11-08).
 - **#36 checked:** the 18:34 UTC Force run that Tuesday wrote `xur: []`, and TODAY's XÛR section went away (Bode). His return is first checked at Friday's 17:07 UTC run.
@@ -717,11 +715,12 @@ As of 2026-11-10, everything through #42 is merged into `main`, and `main` match
   - With #30, tapping an alert opens the right tab: weapon → Today, raid → Raids & Dungeons (Bode, 2026-10-19).
   - A normal reset with #28 and #30 (2026-10-19, 17:07 UTC): every alert looked right (Bode).
 - **Next tasks, in suggested order:**
-  1. **Finish #44** (above), then turn on GitHub Pages. `.github/FUNDING.yml` is still only an idea (Decision log, 2026-10-27); discuss with Bode before the store release.
-  2. **#10** App Store: Bungie terms and Apple guideline check, `ITSAppUsesNonExemptEncryption`, the iPad decision, screenshots, store listing, privacy questionnaire, review notes, upload, internal TestFlight for the roommate, submit. Production-signed builds get push like the ad hoc build.
-     - **iPad recommendation** (Claude, 2026-11-10, waiting for Bode's call): iPhone-only for version 1. Fewer screenshots, no iPad layout review, and Bode's iPad can still run it as an iPhone app. iPad support can be added in an update, but once a version ships with it, it can't be removed.
+  1. **#10** App Store (in progress). `.github/FUNDING.yml` is still only an idea (Decision log, 2026-10-27); discuss with Bode before submitting. Steps: Bungie terms and Apple guideline check, `ITSAppUsesNonExemptEncryption`, the iPad decision, screenshots, store listing, privacy questionnaire, review notes, upload, internal TestFlight for the roommate, submit. Production-signed builds get push like the ad hoc build.
+     - **Done in the project** (2026-11-10): iPhone-only (`TARGETED_DEVICE_FAMILY = 1` on every target), portrait only, `ITSAppUsesNonExemptEncryption = false` in `Info.plist` (the app only uses HTTPS through the OS, so App Store Connect stops asking about export compliance), and a launch screen with the app icon centred on the app's dark background (`#0B0E11` in `LaunchScreen.storyboard`, instead of Flutter's white). The icon is 128 pt with rounded corners, in `Assets.xcassets/LaunchImage.imageset` (1x/2x/3x, made from `assets/icon/app_icon.png` with a small CoreGraphics script; remake them if the icon changes). iOS caches launch screens, so a reinstall may still show the old one until the device restarts. An App Store build (`flutter build ipa --release` in `app/`) signs, with `aps-environment = production`. Every SDK in the app ships its own privacy manifest, and our code uses no required-reason APIs, so the app needs none of its own.
+     - **Bode's iPad keeps a native iPad build** for daily use (iPhone-only apps run in a small phone-sized window there). To make one: check out the iPad settings from before #10 for the build only (`git checkout 2e5564b -- app/ios/Runner.xcodeproj/project.pbxproj app/ios/Runner/Info.plist`), build and install the ad hoc build (iOS > Running on the iPad), then put them back with `git checkout HEAD -- <same files>`. Never commit them.
+     - **Still to do:** Bungie API terms and Apple guideline check, the App Store Connect record, screenshots (6.9" iPhone), listing text, review notes, App Privacy and age-rating answers, upload, internal TestFlight for the roommate, submit.
      - **What Bode does in App Store Connect** (Claude gives the clicks): create the app record (name, bundle ID `com.id0.d2lootalert`, SKU), paste the listing, screenshots, privacy and support URLs, category, Free, countries, the App Privacy and age-rating questionnaires, the EU trader declaration (not a trader), upload the build from Xcode's Organizer, add the roommate as an internal TestFlight tester, submit. An individual account shows Bode's legal name as the seller. No banking or tax setup for a free app.
-  3. **#45** signed Android APK.
+  2. **#45** signed Android APK.
 - **Keep an eye on:**
   - Remove the `shared_preferences_android` pin once a version after 2.5.0 fixes release builds.
   - **The iPad's ad hoc build expires 2027-09-04.** Rebuild and reinstall before then (iOS > Running on the iPad), or move the iPad to TestFlight with #10.
@@ -802,6 +801,7 @@ As of 2026-11-10, everything through #42 is merged into `main`, and `main` match
 - **2026-11-08:** **iOS alerts match Android's** (#31): icon collapsed, banner expanded, through a Notification Content Extension picked by the `banner` category. Raids use their banner for both. Chosen over the simpler "banner for both" on weapons too, because the collapsed alert should show which weapon it is.
 - **2026-11-08:** **Straight to the App Store, not TestFlight first** (Bode). Apple doesn't require TestFlight, and the uploaded build reaches internal TestFlight testers anyway, so the roommate tests on an iPhone during review. #10 became the App Store release; the Android APK moved to #45. Release plan: #42 icon, #43 banner retry, #44 privacy policy and support page, then #10.
 - **2026-11-08:** **App icon by Owen Hartman** (Bode's roommate), generated with `flutter_launcher_icons` (Bode: easier to change later than hand-made files). The Android notification icon is a white silhouette made from it, since Android shows the solid icon as a white square.
+- **2026-11-10:** **Version 1 is iPhone-only and portrait-only** (Bode, #10). Fewer screenshots and no iPad layout review; Bode's iPad runs it as an iPhone app. iPad support can come in an update, but once a version ships with it, it can't be removed. The screens were designed tall, so landscape was dropped.
 - **2026-11-10:** **The privacy policy and support page live in this repo's `docs/`, published with GitHub Pages** (#44), not a separate repo. They stay next to the code they describe and are reviewed in the same PRs. If the repo ever goes private, Pages on a free account stops working, so the policy would need a new home first.
 - **2026-11-10:** **Public contact is a dedicated address, `d2lootalert@gmail.com`**, not Bode's personal email, which would be harvested from the public pages and the App Store. It can forward to Bode's inbox.
 - **2026-11-10:** **The privacy policy promises no analytics, ads, tracking or accounts.** The built app was checked: no Google Analytics library is linked (`IS_ANALYTICS_ENABLED` is false). Firebase Installations and FCM tokens are the only identifiers, used to deliver notifications. Adding any SDK that collects data means updating the policy first.
