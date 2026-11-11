@@ -30,6 +30,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  integration_test: # runs the real app in a simulator, for the store screenshots (#10)
+    sdk: flutter
   flutter_launcher_icons: ^0.14.4 # generates the app icons below (#42); never ships in the app
 
 # App icon by Owen Hartman (#42). To change it, replace assets/icon/app_icon.png and
