@@ -11,8 +11,11 @@ next version starts from it. Limits are Apple's character counts.
 - **Content rights:** "Yes, it contains, shows or accesses third-party content, and I have the
   necessary rights": the images and game data come from Bungie's official public API, used
   under its non-commercial terms.
-- **Age rating:** answer "None" / "No" to everything → 4+. The app shows weapon icons, but no
-  violence.
+- **Age rating:** 12+.
+  - "Guns or Other Weapons" is **Frequent**, since the app shows weapon icons and names throughout. Apple's
+    2025 questionnaire added that question.
+  - Everything else is "None" / "No": no violence, web browser, user content, ads, gambling, contests or
+    loot boxes.
 
 ## Version page
 
@@ -61,7 +64,7 @@ what game it's for:
 - **Support URL:** https://bodekaanta.github.io/D2-Loot-Alert/
 - **Marketing URL:** (leave empty)
 - **Privacy Policy URL** (App Privacy page): https://bodekaanta.github.io/D2-Loot-Alert/privacy/
-- **Copyright:** 2026 Bode Kaanta
+- **Copyright:** 2026 Bode Kaanta (in General App Information, near the bottom of the version page)
 - **Version:** 1.0.0
 
 ## App Privacy
@@ -84,9 +87,8 @@ what game it's for:
 >
 > Notifications are sent by our server shortly after the game's daily reset (17:00 UTC), and
 > only for watched items that are available that day or week, so one can't be triggered on
-> demand. The attached screen recording shows the whole flow: watching a weapon, the
-> notification arriving after reset, the expanded notification with the activity's picture,
-> and tapping it to open the app.
+> demand. The attached screen recording shows watching a weapon, then its notification
+> arriving. Tapping a notification opens the app.
 >
 > Content: all game images and data come from Bungie's official public Bungie.net API
 > (https://github.com/Bungie-net/api), used under its terms for non-commercial apps. The app
@@ -96,13 +98,25 @@ what game it's for:
 - **Sign-in required:** No.
 - **Attachment:** a screen recording of a real notification, made on the iPad (steps in CLAUDE.md > #10).
   The bonus focus changes at every reset, so a reviewer can't count on getting one.
-- **Contact:** Bode's name, phone and personal email (only Apple sees these).
+  - **The notes may only claim what the video shows.** 1.0's recording didn't show tapping the
+    notification, so the notes describe that as how the app works, not as part of the video.
+  - **Upload it as an H.264 `.mp4` with a lowercase extension.** App Store Connect refused the iPad's own
+    file, which was HEVC with an uppercase `.MP4` ("file type isn't supported"). Convert it with
+    `avconvert --source <in> --preset PresetHighestQuality --output <out>.mp4`.
+- **Contact:** Bode's name and phone, and `d2lootalert@gmail.com` (only Apple sees these).
 
 ## Screenshots
 
-6.9" iPhone, 1320 × 2868, made with `app/tool/screenshots.sh` in the iPhone 18 Pro Max
-simulator (see CLAUDE.md > #10). Apple scales them down for smaller iPhones. Upload in this
-order:
+- **Required:** at least one for **iPhone with Dynamic Island (medium display)**, 1206 × 2622 (or
+  1179 × 2556).
+- **Optional:** the large display (Pro Max), 1320 × 2868. Apple scales screenshots for the other iPhones.
+- **No alpha channel.** App Store Connect refuses PNGs with transparency, and the simulator's are RGBA.
+
+For 1.0 (2026-11-11), the 1320 × 2868 captures from `app/tool/screenshots.sh` (iPhone 18 Pro Max
+simulator) were redrawn without alpha at both sizes with a small CoreGraphics script. Making the
+script do that itself is on the cleanup list (CLAUDE.md > Decision log, 2026-11-11 code review).
+
+Upload in this order:
 
 1. TODAY with READY TO FARM showing watched items
 2. TODAY scrolled to the BONUS FOCUS categories
